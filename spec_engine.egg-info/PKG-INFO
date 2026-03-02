@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: spec-engine
+Version: 1.0.0
+Summary: Automated OpenAPI 3.1 spec generator for enterprise API repositories
+Requires-Python: >=3.11
+Provides-Extra: dev

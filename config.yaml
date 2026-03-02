@@ -1,0 +1,17 @@
+# spec-engine default configuration
+# Override any of these values via CLI flags or a repo-level .spec-engine.yaml
+
+gateway: unknown
+env: production
+owner: unknown
+
+strict_mode: true
+
+required_x_fields:
+  - x-owner
+  - x-gateway
+  - x-lifecycle
+
+exclude_paths: []
+
+out: ./openapi.yaml

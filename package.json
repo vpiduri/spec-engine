@@ -1,0 +1,10 @@
+{
+  "name": "spec-engine-node-deps",
+  "private": true,
+  "description": "Node.js dependencies for TypeScript/Express scanning and schema inference",
+  "dependencies": {
+    "@babel/parser": "^7.24.0",
+    "@babel/types": "^7.24.0",
+    "ts-morph": "^22.0.0"
+  }
+}

@@ -1,0 +1,2 @@
+[console_scripts]
+spec-engine = spec_engine.cli:cli
