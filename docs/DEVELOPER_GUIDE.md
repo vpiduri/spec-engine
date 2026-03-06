@@ -14,6 +14,7 @@
 6. [CLI Reference](#6-cli-reference)
 7. [Framework Scanners](#7-framework-scanners)
 8. [Schema Inferrers](#8-schema-inferrers)
+   - [8.0 AST-Based Analysis: How It Works](#80-ast-based-analysis-how-it-works)
 9. [Assembler, Validator & Publisher](#9-assembler-validator--publisher)
 10. [Data Models](#10-data-models)
 11. [Testing Guide](#11-testing-guide)
@@ -190,6 +191,193 @@ spec-engine/
 
 ## 4. Pipeline Architecture
 
+### Stage 0 — Existing Spec Detection (Pre-flight)
+
+Before any scanning or inference runs, spec-engine checks whether the repository
+already contains a committed OpenAPI spec. This pre-flight stage can save significant
+time in the initial batch load: roughly 20–35% of enterprise repos already have a
+committed spec that was never published to the catalog.
+
+**Entry point:** `spec_engine/detector.py :: detect_existing_spec()`
+
+#### What spec-engine looks for
+
+```python
+# Default search paths (checked in priority order)
+KNOWN_SPEC_PATHS = [
+    "openapi.yaml",  "openapi.yml",  "openapi.json",
+    "swagger.yaml",  "swagger.yml",  "swagger.json",
+    "api.yaml",      "api.json",
+    "docs/openapi.yaml",         "docs/api.yaml",
+    "docs/swagger.yaml",
+    ".openapi/spec.yaml",
+    "src/main/resources/openapi.yaml",          # Spring Boot convention
+    "src/main/resources/static/openapi.yaml",
+    "src/main/resources/swagger.yaml",
+]
+```
+
+Custom paths can be added via `existing_spec_paths:` in `.spec-engine.yaml`.
+
+#### Decision algorithm — three outcomes
+
+```
+Repo contains a committed spec file?
+│
+├── No → run full AST pipeline (Stage 1–6, current behaviour)
+│
+└── Yes
+      │
+      ├── Step A: Format validation
+      │     Is it valid OpenAPI 3.x or Swagger 2.0?
+      │     ├── No  → log WARNING, fall back to full AST pipeline
+      │     └── Yes → continue
+      │
+      ├── Step B: Coverage check
+      │     Run Stage 1 scanner (routes only, no inference — fast)
+      │     Compare AST route set vs routes in existing spec
+      │     Coverage = (routes in spec) / (routes found by AST)
+      │
+      │     Coverage < 70%  → existing spec is incomplete
+      │     │                  run full AST pipeline
+      │     │                  optionally merge descriptions (hybrid mode)
+      │     │
+      │     Coverage ≥ 70%  → continue to Step C
+      │
+      ├── Step C: Staleness check
+      │     spec_mtime = git log --format="%ci" -1 -- <spec_file>
+      │     code_mtime = git log --format="%ci" -1 -- src/
+      │     days_behind = (code_mtime - spec_mtime).days
+      │
+      │     days_behind > freshness_threshold (default: 90)
+      │     → flag as STALE in x-spec-source metadata
+      │     → still usable but publish with staleness warning
+      │
+      └── Step D: Mode decision
+            Mode = config.existing_spec_mode
+            │
+            ├── "fast-path" → inject required x- fields, validate, publish
+            │                 skip Stage 1–5 entirely
+            │
+            ├── "merge"     → run Stage 1–3 for structure + schemas
+            │                 pull descriptions, examples, servers,
+            │                 security schemes from existing spec
+            │                 publish merged result
+            │
+            └── "skip"      → ignore existing spec, run full AST pipeline
+```
+
+#### Mode comparison
+
+| Mode | When to use | What is published | Stage 1–3 run? |
+|---|---|---|---|
+| `fast-path` | Existing spec is trusted, current, and well-maintained | Existing spec + injected x- fields | No |
+| `merge` | Existing spec has good descriptions but may be incomplete or slightly stale | AST-derived structure + existing spec enrichment | Yes |
+| `skip` | Existing spec is known to be generated/outdated; always regenerate | Full AST-generated spec | Yes |
+| `auto` (default) | Let the engine decide based on coverage and staleness | Fast-path if quality gates pass; merge otherwise | Conditional |
+
+#### Why "just publish" is not the default
+
+A spec file that passes Spectral/Redocly validation is **format-correct** but
+not necessarily **content-correct**. A spec written 18 months ago looks completely
+valid yet every schema could be wrong. Publishing it to the catalog as authoritative
+is worse than no spec, because it creates false confidence for API consumers.
+
+The coverage check (Step B) is the critical gate. It cross-references the existing
+spec against what the AST scanner actually finds in the current source code. A spec
+that misses 35% of routes is not a candidate for fast-path publish, regardless of
+how well-formatted it is.
+
+#### The hybrid merge — what gets taken from where
+
+The `merge` mode combines the accuracy of AST inference with the richness of
+human-authored content:
+
+| Field | Source | Reason |
+|---|---|---|
+| HTTP methods and paths | **AST scanner** (authoritative) | Existing spec may have obsolete paths |
+| Path/query parameters | **AST scanner** (authoritative) | Annotation-derived; more accurate than prose |
+| Request body schema | **AST inferrer** (authoritative) | Field types and constraints from current code |
+| Response schema | **AST inferrer** (authoritative) | Return type from current code |
+| `summary`, `description` | **Existing spec** (if present) | Human-written; AST cannot infer prose |
+| `examples` in bodies | **Existing spec** (if present) | Hand-crafted; AST cannot generate |
+| `servers` section | **Existing spec** (preferred) | Hard to derive from code |
+| `securitySchemes` | **Existing spec** (preferred) | Often not in annotations |
+| `info.description` | **Existing spec** (preferred) | High-level API narrative |
+| `externalDocs` | **Existing spec** (if present) | Documentation links |
+| `x-owner`, `x-gateway`, `x-lifecycle` | **Config / CLI** (always injected) | Org governance metadata |
+
+This produces a spec that is accurate (structure from code) and rich
+(documentation from humans) — better than either source alone.
+
+#### Detecting framework-generated specs
+
+Some frameworks auto-generate spec files that are committed to the repo:
+
+| Source | Location | Quality | Recommended mode |
+|---|---|---|---|
+| SpringDoc / Springfox | `src/main/resources/static/openapi.yaml` | High (runtime-generated) | `fast-path` if recent |
+| FastAPI export | `openapi.json` (often in root or `docs/`) | High | `fast-path` if recent |
+| `drf-spectacular` export | `schema.yaml` | High | `fast-path` if recent |
+| Hand-written | Any | Variable | `merge` (safe default) |
+| Another tool (Postman export, etc.) | Various | Low-Medium | `merge` or `skip` |
+
+For framework-generated specs, coverage will typically be very high (>95%).
+Combined with a recent staleness check, these are excellent fast-path candidates.
+
+#### Configuration
+
+```yaml
+# config.yaml or .spec-engine.yaml
+existing_spec_mode: auto          # skip | fast-path | merge | auto
+existing_spec_freshness: 90       # days; flag as stale if code newer than spec by this
+existing_spec_min_coverage: 0.70  # 0.0–1.0; below this threshold → fall back to AST
+existing_spec_paths:              # additional search paths (appended to defaults)
+  - "api-contracts/openapi.yaml"
+  - "internal/docs/swagger.yaml"
+```
+
+#### CLI flag
+
+```bash
+# Override mode for a single run
+spec-engine generate --repo . --existing-spec-mode fast-path
+spec-engine generate --repo . --existing-spec-mode skip    # always regenerate
+spec-engine generate --repo . --existing-spec-mode merge
+```
+
+#### Output metadata
+
+When an existing spec is detected and used, the published spec includes:
+
+```yaml
+info:
+  x-spec-source: existing       # existing | ast | merged
+  x-existing-spec-path: docs/openapi.yaml
+  x-existing-spec-coverage: 0.94   # fraction of AST routes found in existing spec
+  x-existing-spec-age-days: 22     # days since spec was last committed
+  x-spec-freshness: current        # current | stale (if age > freshness_threshold)
+```
+
+This makes it transparent in the catalog exactly how each spec was produced.
+
+#### Batch loader integration
+
+The batch orchestrator reports existing spec detection per row:
+
+```
+batch_report.csv columns added:
+  existing_spec_found     true/false
+  existing_spec_mode_used fast-path | merge | skip | none
+  existing_spec_coverage  0.0–1.0
+  existing_spec_age_days  integer
+```
+
+Fast-path repos complete in 5–10 seconds instead of 30–90 seconds, significantly
+reducing total batch run time when a large fraction of the inventory has existing specs.
+
+---
+
 ### Stage 1 — Scanner
 
 **Entry point:** `spec_engine/scanner/__init__.py :: get_scanner()`
@@ -271,6 +459,254 @@ resolve_type("CreateAccountRequest")
 | `MEDIUM` | Partial resolution; some fields unknown | Yes (after review) |
 | `LOW` | Heuristic fallback used | No |
 | `MANUAL` | Type unresolvable (dynamic code, reflection) | No |
+
+---
+
+### AST-Based Analysis — Technical Foundations
+
+Both the Scanner (Stage 1) and the Schema Inferrer (Stage 3) are built on
+**Abstract Syntax Tree (AST) parsing**. Understanding what an AST is and how each
+language produces one is essential to understanding how spec-engine works and how
+to extend it.
+
+#### What is an Abstract Syntax Tree?
+
+When a compiler or interpreter reads source code it first converts raw text into a
+structured, hierarchical data model that captures the meaning of the code without
+the noise of whitespace, comments, or operator precedence rules. This data model is
+the **Abstract Syntax Tree**.
+
+```
+Source text                       AST (simplified)
+─────────────────────             ──────────────────────────────────────
+@GetMapping("/accounts")          MethodDeclaration
+public List<Account>                ├── annotation: GetMapping
+  listAccounts(                   │     └── value: "/accounts"
+    @RequestParam int page) {     ├── returnType: List<Account>
+  return accountService.all();    ├── name: "listAccounts"
+}                                 └── parameters:
+                                        └── Parameter
+                                              ├── annotation: RequestParam
+                                              └── type: int
+                                              └── name: "page"
+```
+
+The tree makes it trivial to answer questions like:
+- "What is the HTTP path for this method?" → walk to `annotation.GetMapping.value`
+- "What are the request parameters?" → walk to `parameters[*].annotation`
+- "What is the return type?" → walk to `returnType`
+
+Without an AST, answering these questions with regex would require handling
+thousands of whitespace, comment, and formatting variations. The AST collapses
+all of those surface differences into a single, uniform structure.
+
+#### How each language produces an AST
+
+spec-engine uses a different library per language, but the traversal pattern
+is the same in every case: **walk the tree, match node types, extract values**.
+
+| Language | AST library | Where it runs | Notes |
+|---|---|---|---|
+| Python | `ast` (stdlib) | In-process | Zero dependencies; parses Python source natively |
+| Java | `javalang` (pip) | In-process | Pure-Python Java parser; no JVM required |
+| TypeScript | `ts-morph` (npm) | Node.js subprocess | Wraps the TypeScript compiler's own type-checker |
+| Go | `go/ast` (stdlib) | Compiled Go binary | Called as a subprocess; outputs JSON to stdout |
+
+#### The Scanner's use of AST (Stage 1)
+
+Framework scanners use AST to find **route declarations** — the annotations or
+function-call patterns that define HTTP endpoints.
+
+**Python example (FastAPI scanner):**
+
+```python
+import ast
+
+source = open("routes.py").read()
+tree = ast.parse(source)
+
+for node in ast.walk(tree):
+    if isinstance(node, ast.FunctionDef):
+        for decorator in node.decorator_list:
+            # Match @router.get("/path") or @app.post("/path")
+            if isinstance(decorator, ast.Call):
+                if isinstance(decorator.func, ast.Attribute):
+                    http_method = decorator.func.attr.upper()  # "get" → "GET"
+                    if http_method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                        path = decorator.args[0].s  # "/v1/accounts"
+                        handler = node.name          # "list_accounts"
+```
+
+**Java example (Spring scanner):**
+
+```python
+import javalang
+
+tree = javalang.parse.parse(open("AccountController.java").read())
+
+for _, method in tree.filter(javalang.tree.MethodDeclaration):
+    for annotation in method.annotations:
+        if annotation.name in ("GetMapping", "PostMapping", "PutMapping", ...):
+            # annotation.element is the path string value
+            path = _get_annotation_value(annotation, "value") or "/"
+```
+
+**Go example (Gin scanner — via compiled binary):**
+
+The Go scanner can't use a Python library because no Python-native Go parser
+exists with sufficient quality. Instead, a small Go binary (`gin_ast.go`) is
+compiled once and called as a subprocess:
+
+```go
+// gin_ast.go — compiled to a binary, called as subprocess
+package main
+
+import (
+    "go/ast"
+    "go/parser"
+    "go/token"
+)
+
+func extractRoutes(filename string) []Route {
+    fset := token.NewFileSet()
+    f, _ := parser.ParseFile(fset, filename, nil, 0)
+
+    ast.Inspect(f, func(n ast.Node) bool {
+        call, ok := n.(*ast.CallExpr)
+        if !ok { return true }
+        // Match r.GET("/path", handler) or v1.POST("/accounts", ...)
+        if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+            method := sel.Sel.Name  // "GET", "POST", ...
+            if isHTTPMethod(method) && len(call.Args) >= 1 {
+                path := extractStringLit(call.Args[0])
+                // emit route ...
+            }
+        }
+        return true
+    })
+}
+```
+
+The binary outputs JSON to stdout; the Python scanner reads and parses it.
+If the binary is unavailable, a Python regex fallback activates automatically.
+
+#### The Inferrer's use of AST (Stage 3)
+
+Schema inferrers use AST to find **type definitions** — the class, struct, or
+interface declarations that describe request/response bodies.
+
+The traversal pattern is different from the scanner: instead of looking for
+decorated methods, it looks for named type declarations and extracts their fields.
+
+**Python — Pydantic model resolution:**
+
+```python
+import ast
+
+source = open("models.py").read()
+tree = ast.parse(source)
+
+for node in ast.walk(tree):
+    if isinstance(node, ast.ClassDef) and node.name == "CreateAccountRequest":
+        for item in node.body:
+            if isinstance(item, ast.AnnAssign):  # name: str = Field(...)
+                field_name = item.target.id        # "name"
+                field_type = item.annotation       # ast.Name("str")
+                default    = item.value            # ast.Call(Field, ...)
+```
+
+**Java — javalang class resolution:**
+
+```python
+import javalang
+
+tree = javalang.parse.parse(open("CreateAccountRequest.java").read())
+
+for _, cls in tree.filter(javalang.tree.ClassDeclaration):
+    if cls.name == "CreateAccountRequest":
+        for field in cls.fields:               # FieldDeclaration
+            type_name = field.type.name        # "String", "Integer", ...
+            fname     = field.declarators[0].name
+            for ann in field.annotations:      # @NotNull, @Size(min=1, max=50)
+                # ann.name = "NotNull"
+                # ann.element = [MemberValuePair("min", "1"), ...]
+```
+
+**Go — struct tag parsing (via binary):**
+
+```go
+// go/ast struct → JSON Schema
+for _, field := range structType.Fields.List {
+    tag := ""
+    if field.Tag != nil {
+        tag = field.Tag.Value  // `json:"name" validate:"required,min=1"`
+    }
+    jsonName  := parseJsonTag(tag)      // "name"
+    required  := hasValidateRequired(tag) // true
+    minVal    := parseValidateMin(tag)   // 1.0
+}
+```
+
+**TypeScript — ts-morph interface resolution:**
+
+```typescript
+// ts_schema.js — Node.js companion script
+import { Project } from "ts-morph";
+
+const project = new Project();
+const sf = project.addSourceFileAtPath(process.argv[2]);
+
+for (const iface of sf.getInterfaces()) {
+    if (iface.getName() === targetType) {
+        for (const prop of iface.getProperties()) {
+            const name     = prop.getName();           // "accountName"
+            const type     = prop.getType().getText(); // "string"
+            const optional = prop.hasQuestionToken();  // → nullable
+        }
+    }
+}
+// Output as JSON to stdout → Python reads and converts to JSON Schema
+```
+
+#### Cycle detection during AST inference
+
+Recursive types (a `Comment` that contains a list of `Comment` replies) would
+cause infinite recursion if not handled. `BaseInferrer` maintains a `_visiting`
+set:
+
+```python
+def resolve_type(self, type_name: str) -> SchemaResult:
+    if type_name in self._visiting:
+        # Cycle detected — return a $ref to break the loop
+        return SchemaResult(
+            json_schema={"$ref": f"#/components/schemas/{type_name}"},
+            confidence=Confidence.HIGH,
+        )
+    self._visiting.add(type_name)
+    try:
+        result = self._extract_fields(type_name)
+    finally:
+        self._visiting.discard(type_name)
+    return result
+```
+
+This mirrors what Java/TypeScript compilers do internally: deferred resolution
+using a forward reference until the full type is known.
+
+#### When regex is used instead of AST
+
+Regex fallback activates when the AST dependency is unavailable:
+
+| Situation | Fallback | Confidence penalty |
+|---|---|---|
+| `node` not installed → NestJS scanner | Python regex on `.ts`/`.js` files | None for route paths; schema MANUAL |
+| Go binary not compiled → Gin scanner | Python regex on `.go` files | LOW on complex path groups |
+| `go/ast` binary fails → Go inferrer | Python regex on struct declarations | MEDIUM for simple structs; MANUAL for complex |
+| `ts-morph` unavailable → TS inferrer | No fallback; returns empty | MANUAL |
+
+**Regex is always a degraded path.** It cannot handle multi-line declarations,
+complex generic types, or annotations that span multiple lines.
+The AST path is always preferred when dependencies are available.
 
 ---
 
@@ -383,6 +819,10 @@ catalog_url: "https://catalog.example.com/api/v1"
 | `lifecycle` | str | `"production"` | Value for `x-lifecycle` field |
 | `catalog_url` | str | `null` | Publisher catalog endpoint |
 | `servers` | list | `[{url: "/"}]` | OpenAPI servers block |
+| `existing_spec_mode` | str | `"auto"` | `auto` \| `fast-path` \| `merge` \| `skip` — see Stage 0 |
+| `existing_spec_freshness` | int | `90` | Days; flag as stale if source code is newer than spec by this amount |
+| `existing_spec_min_coverage` | float | `0.70` | Minimum fraction of AST routes that must appear in existing spec; below this → fall back to AST |
+| `existing_spec_paths` | list | `[]` | Additional search paths appended to built-in defaults |
 
 ### Config file (`config.yaml`)
 
@@ -709,6 +1149,89 @@ v1 := r.Group("/v1")
 ---
 
 ## 8. Schema Inferrers
+
+### 8.0 AST-Based Analysis: How It Works
+
+Before diving into per-language details, this section explains the shared
+AST traversal model that all four inferrers follow.
+
+#### The three-step inference loop
+
+Every inferrer follows the same three-step loop regardless of language:
+
+```
+Step 1 — Find the file
+   BaseInferrer._find_type_file("CreateAccountRequest")
+   ├── Glob all source files of the right extension
+   ├── Grep each for the type name
+   ├── Apply model-first heuristic (prefer "model", "dto" in path)
+   ├── Apply prefer_file glob from config
+   └── Return best candidate Path
+
+Step 2 — Parse the file into an AST
+   Language-specific library reads the file and builds a tree
+   Python  → ast.parse(source)                       (in-process)
+   Java    → javalang.parse.parse(source)             (in-process)
+   Go      → go/ast via compiled binary subprocess    (out-of-process)
+   TypeScript → ts-morph via Node.js subprocess       (out-of-process)
+
+Step 3 — Walk the tree to extract fields
+   Language-specific traversal finds the named type declaration
+   For each field:
+     - Extract JSON field name       (from annotation / tag / property name)
+     - Determine JSON Schema type    (string, integer, number, boolean, array, object)
+     - Check required / nullable     (from annotation or type modifier)
+     - Extract constraints           (min, max, pattern, format, ...)
+     - If nested type → recurse via resolve_type() with cycle guard
+```
+
+#### How a source file becomes a JSON Schema object
+
+Taking a Spring Boot request body as a worked example across all four stages:
+
+```
+Java source                      javalang AST nodes               JSON Schema output
+──────────────────────           ─────────────────────────        ──────────────────────────────
+@NotNull                         AnnotationDeclaration            "required": ["name"]
+@Size(min=1, max=50)              └─ name: "Size"
+private String name;              └─ element: [{min:1},{max:50}]  "minLength": 1, "maxLength": 50
+
+@Valid                           AnnotationDeclaration            "$ref": "#/components/schemas/
+private Address addr;             └─ name: "Valid"                          Address"
+                                 FieldDeclaration
+                                  └─ type: ReferenceType("Address")
+
+@JsonIgnore                      AnnotationDeclaration            (field excluded)
+private String _cache;            └─ name: "JsonIgnore"
+```
+
+The same principle applies for every language — the AST node type and the
+annotation/tag/decorator is the input; the JSON Schema keyword is the output.
+
+#### Why `_find_type_file` is important
+
+A common source of MANUAL confidence is the engine not finding the type file.
+This happens when:
+
+1. **Type is in a shared library** — a separate repo, not present in the clone
+2. **Type is defined in a generated file** — in a path covered by `exclude_paths`
+3. **Type is a primitive wrapped in a typedef** — `type UserID = string` in Go
+4. **Multiple files define the same type** — engine warns and picks one; use
+   `prefer_file` in config to be explicit
+
+To debug a missing type, run the schema subcommand directly:
+
+```bash
+spec-engine schema \
+  --manifest route_manifest.json \
+  --repo .  \
+  --verbose
+# DEBUG lines show: "Searching for type 'CreateAccountRequest' in X files"
+# DEBUG: "Found at: src/main/java/com/example/dto/CreateAccountRequest.java"
+# DEBUG: "Resolved 5 fields with HIGH confidence"
+```
+
+---
 
 ### Java (javalang)
 

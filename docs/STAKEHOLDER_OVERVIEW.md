@@ -700,6 +700,107 @@ The engine performs **purely static analysis**. There is no LLM inference, appli
 - Fully deterministic — same code produces the same spec every time
 - No per-call API costs
 
+#### 5.1.1 What "reads source code" actually means — AST explained
+
+When we say spec-engine "reads source code to generate a spec," a natural question is:
+*how does software read code? Doesn't reading code require running it?*
+
+The answer is **Abstract Syntax Tree (AST) parsing** — the same technique compilers
+use to understand code before they execute it.
+
+**The analogy: grammar of a sentence**
+
+Consider the English sentence: *"The quick brown fox jumps over the lazy dog."*
+
+A grammar parser breaks this into a tree:
+
+```
+Sentence
+  ├── Subject:   "The quick brown fox"   (noun phrase)
+  ├── Verb:      "jumps"                 (verb)
+  └── Object:    "over the lazy dog"     (prepositional phrase)
+```
+
+You understand the *structure* of the sentence — who does what — without needing to
+watch a real fox jump over a real dog.
+
+An AST does exactly the same thing for source code. Given:
+
+```java
+@GetMapping("/v1/accounts")
+public List<Account> listAccounts(@RequestParam int page) { ... }
+```
+
+The AST parser produces a tree like:
+
+```
+Method Declaration
+  ├── Annotation:  @GetMapping → path = "/v1/accounts"
+  ├── Return type: List<Account>
+  ├── Name:        listAccounts
+  └── Parameter:
+        ├── Annotation: @RequestParam
+        ├── Type:       int
+        └── Name:       page
+```
+
+spec-engine reads this tree and directly answers:
+- *"What is the HTTP method?"* → GET (from `@GetMapping`)
+- *"What is the path?"* → `/v1/accounts` (from the annotation value)
+- *"Are there query parameters?"* → yes, `page` (integer, from `@RequestParam`)
+- *"What does it return?"* → a list of `Account` objects
+
+**No code ever runs.** spec-engine never starts the application, never makes a network
+call, never connects to a database. It reads the source file the same way a compiler
+does — as structured text.
+
+#### 5.1.2 How this works for each language
+
+The AST technique is universal, but each language has its own parser library:
+
+| Language | How spec-engine reads it | What it looks for |
+|---|---|---|
+| **Java** | `javalang` library parses `.java` files in memory | `@GetMapping`, `@PostMapping`, `@RequestBody`, `@NotNull`, `@Size`, etc. |
+| **Python** | Python's built-in `ast` module parses `.py` files | `@router.get()`, `class MyModel(BaseModel)`, `Field(min_length=1)` |
+| **TypeScript** | TypeScript compiler (via `ts-morph`) reads `.ts` files | `@Controller()`, `@Get()`, `interface CreateRequest { name: string }` |
+| **Go** | Standard `go/ast` library reads `.go` files | `r.GET("/path", handler)`, `type Request struct { Name string \`json:"name"\` }` |
+
+In every case: the source file is parsed into a tree, the tree is walked to find
+route declarations and type definitions, and the results are assembled into a spec.
+
+#### 5.1.3 Why AST is better than the alternatives
+
+Three common alternatives exist for automated spec generation, and each has
+significant drawbacks compared to AST:
+
+| Approach | How it works | Drawback |
+|---|---|---|
+| **Runtime / reflection** | Run the app; intercept HTTP traffic or call reflection APIs | Requires a running app, live database, test data; impossible in CI for most services |
+| **Regex on source** | Pattern-match annotation strings with regular expressions | Brittle; breaks on multi-line annotations, whitespace variations, comments, generics |
+| **LLM (AI) inference** | Send code to a large language model; ask it to infer the spec | Non-deterministic; sends source code to external services; expensive per call; hallucinations |
+| **AST parsing (spec-engine)** | Parse source into a structured tree; extract facts from the tree | Requires language-specific parser; some dynamic patterns require manual review |
+
+AST parsing is the same approach used by IDEs (IntelliJ, VS Code), linters, code
+formatters, and compilers. It is the most reliable way to understand code structure
+without executing it.
+
+#### 5.1.4 What AST parsing cannot do — and how spec-engine handles it
+
+AST parsing works on **what is written in the source file**. It cannot infer:
+
+- Routes registered dynamically at runtime (`routes.push({ path: computePath() })`)
+- Types loaded from a database or configuration file at startup
+- Behaviour driven by runtime feature flags
+
+When spec-engine encounters these patterns, it does not silently produce a wrong answer.
+Instead it sets the **confidence level** to `MANUAL` for that specific route or field,
+blocks it from automatic publishing, and flags it in the report. The API team then
+either adds a static annotation the engine can read, or authors that section of the
+spec manually.
+
+This is the foundation of the confidence-driven governance model described in the
+next section.
+
 ### 5.2 Confidence-driven governance
 
 Every inferred schema carries a confidence level that controls publish behavior:
@@ -731,7 +832,65 @@ In Approach 2, the platform injects the top layer. Teams can still override via 
 
 Every external tool dependency (Node.js, Go, Redocly, Spectral) is optional. Scanners fall back gracefully when tools are absent. This means the initial batch run succeeds even if some target repos use frameworks where optional tools aren't installed.
 
-### 5.5 Zero application code changes
+### 5.5 Intelligent reuse of existing specs
+
+Some API teams have already written an OpenAPI spec and committed it to their
+repository, but never connected it to the Explorer catalog. spec-engine detects
+this and can take the fastest, highest-quality path automatically.
+
+#### The problem with "just publish what's there"
+
+A committed spec file that passes format validation looks correct — but may have
+been written 18 months ago and never updated since. Publishing a stale spec as
+authoritative is worse than publishing no spec, because API consumers trust and
+act on the wrong information.
+
+spec-engine therefore never blindly publishes an existing spec. It applies
+three quality gates before deciding what to do:
+
+| Gate | Check | If failed |
+|---|---|---|
+| **Format** | Is the file valid OpenAPI 3.x or Swagger 2.0? | Skip it; generate from AST |
+| **Coverage** | Does it cover ≥70% of the routes that AST scanning finds in the current code? | Generate from AST (existing spec is incomplete) |
+| **Freshness** | Is the spec newer than 90 days relative to the last code change? | Flag as potentially stale; still publishable with a warning |
+
+#### Three outcomes
+
+```
+Existing spec passes all quality gates → Fast-path publish
+    Inject required org metadata (x-owner, x-gateway, x-lifecycle)
+    Publish in 5–10 seconds instead of 30–90 seconds
+    No AST scanning needed
+
+Existing spec passes format + freshness but fails coverage → Hybrid merge
+    Run AST generation for structure and schemas (accurate, current code)
+    Pull descriptions, examples, servers from existing spec (human-written)
+    Publish the best of both: AST accuracy + human richness
+
+No existing spec, or spec fails format/coverage → Full AST pipeline
+    Current behaviour; deterministic generation from source code
+```
+
+#### Why the hybrid merge is often the best result
+
+The merged spec combines what each source does well:
+
+| | Existing spec | AST-generated | Merged (best) |
+|---|---|---|---|
+| Route accuracy vs current code | May be stale | Always current | ✓ Current |
+| Schema field correctness | May be wrong | ✓ From type annotations | ✓ From annotations |
+| Operation descriptions/summaries | ✓ Human-written | None (AST can't infer prose) | ✓ Human-written |
+| Request/response examples | ✓ Hand-crafted | None | ✓ Hand-crafted |
+| Security scheme definitions | ✓ Often present | Partial | ✓ From existing spec |
+
+#### Impact on the initial batch load
+
+In typical enterprise inventories, 20–35% of repos have a committed spec file.
+Of those, roughly half pass the quality gates. Fast-pathing those repos
+reduces total Phase 1 batch time by 10–15%, and produces richer catalog
+entries for the repos where human descriptions already exist.
+
+### 5.6 Zero application code changes
 
 spec-engine is **read-only**. It never modifies application code, adds annotations or imports, changes build scripts, or requires library dependencies in the target repo. A team can be fully onboarded with zero changes to their application code.
 
@@ -1163,6 +1322,116 @@ Success criteria:
 
 ---
 
+### AI Coding Agents — could Devin build or replace this?
+
+**Short answer: No. Devin is not the right tool for this project.**
+
+Devin and similar autonomous AI coding agents are genuinely useful for
+bounded, well-specified software tasks — "implement this function," "fix
+this failing test." This project is not that. Below is an honest assessment
+of where AI agents fall short for this specific problem.
+
+#### What Devin is good at
+
+| Devin's strengths | Relevance to this project |
+|---|---|
+| Writing boilerplate code from a clear specification | Useful for scaffolding (small fraction of total effort) |
+| Fixing well-described, reproducible bugs | Useful in isolation; not the bottleneck |
+| Generating unit tests for known inputs | Useful but requires human to define edge cases |
+| Completing one bounded task autonomously | Most tasks here are interconnected, not bounded |
+
+#### Why Devin cannot deliver this project
+
+**1. The hard work is not code generation — it is integration.**
+
+The majority of effort in this project is not writing Python code.
+It is:
+- Testing against real internal repos to find annotation patterns that
+  no synthetic fixture can predict
+- Engaging Platform Engineering to configure runner images, org secrets,
+  and Required Workflow policies
+- Validating generated specs against the real Explorer catalog API
+- Coordinating with API teams during the pilot
+
+Devin cannot access internal GitHub repositories, cannot engage a human
+Platform Engineering team, and cannot make judgment calls when edge cases
+multiply. These are human problems, not code problems.
+
+**2. Devin produces code that still requires expert engineers to review.**
+
+For software that runs in enterprise CI pipelines across hundreds of repos,
+every AI-generated line must be reviewed for correctness by an engineer who
+deeply understands the language ecosystem. You still need the engineers —
+they just spend their time reviewing instead of writing. For a project
+where correctness matters more than speed-of-initial-generation, this is
+not a meaningful saving.
+
+**3. AST edge cases are only discovered against real repos, not in a sandbox.**
+
+The most time-consuming bugs in AST-based tooling are discovered when
+patterns in real code do not match what a test fixture suggests. Examples
+from comparable projects:
+
+- A Java annotation parser that works perfectly on examples from the
+  documentation fails on the way a specific internal team chains annotations
+- A Python route scanner that handles `@app.get()` correctly misses
+  `@router.get()` when the router is aliased to a different variable name
+- A Go struct tag parser that handles `json:"name"` fails silently on
+  `json:"name,omitempty,string"` because of the three-part tag format
+
+Devin, running in its own environment with no access to internal repos,
+will not encounter these patterns. The engineer will find them during
+Month 3 integration testing and must fix them with deep ecosystem knowledge.
+
+**4. Using Devin would violate the core security premise of the project.**
+
+The reason spec-engine runs in-house rather than using commercial SaaS tools
+is that **source code never leaves the enterprise environment**. Directing
+an autonomous AI coding agent to build this tool requires giving it read
+access to internal source repositories. This is a larger and more sensitive
+access grant than any commercial API documentation tool requires, and it
+directly contradicts the privacy rationale in Assumption A4.
+
+**5. Devin's cost model is unbounded for iterative, exploratory work.**
+
+Devin charges per software engineering unit (task-hours). A project
+requiring dozens of integration test cycles against real repos, each
+revealing new edge cases that require research, experimentation, and
+architecture decisions, has no predictable ceiling cost. The $500K
+proposal has a fixed budget and a clear scope. Devin's costs for
+equivalent work are unpredictable and likely higher.
+
+#### The right use of AI assistance in this project
+
+AI coding assistants (GitHub Copilot, Claude Code) ARE used — by the
+engineers on the team, in their own development environment, working
+with internal repos. The distinction is:
+
+| | AI coding assistant | Devin (autonomous agent) |
+|---|---|---|
+| Who drives | Human engineer uses AI as accelerator | AI agent works autonomously |
+| Code access | Engineer's existing access only | Requires broad granted access |
+| Review loop | Engineer reviews every suggestion | Output requires separate review cycle |
+| Edge case discovery | Engineer tests against real repos | Cannot access real repos |
+| Cost model | Flat subscription (~$20/mo) | Per-task; unbounded |
+
+AI assistance accelerates individual engineers; it does not replace the
+engineering team for a project of this integration complexity.
+
+#### Summary comparison
+
+| Criterion | Devin | spec-engine (proposed) |
+|---|---|---|
+| Access to internal repos | Requires explicit grants to all repos | Runs in-house; no external access |
+| Handles integration edge cases | Cannot test against internal systems | Engineers iterate against real repos |
+| Platform Engineering engagement | Cannot engage human teams | Dedicated Platform Engineer |
+| Cost predictability | Per-task; unbounded | Fixed $500K budget |
+| Data sovereignty | Source code leaves enterprise | Code never leaves the environment |
+| Production quality | Requires expert review of all output | Engineers own quality end-to-end |
+| Ongoing maintenance | New agent session per change | Permanent internal expertise |
+
+---
+
 ## 15. Success Metrics
 
 ### Primary KPIs
@@ -1248,6 +1517,45 @@ Update the CSV (remove the row or update `repo_url`). The batch orchestrator ski
 Yes. For Approach 1: remove the row from the CSV. For Approach 2: remove the `api-service` topic from the repo. Teams can also add a `.spec-engine.yaml` with `skip: true` (requires a one-line engine change) to exclude a repo from processing.
 
 ---
+
+**Q: Some of our teams already have OpenAPI specs committed to their repos. What happens to those?**
+
+spec-engine detects existing spec files automatically and applies three quality gates
+before deciding what to do:
+
+1. **Format check** — is it valid OpenAPI 3.x or Swagger 2.0?
+2. **Coverage check** — does it cover at least 70% of the routes that AST scanning finds in the current source code?
+3. **Freshness check** — is the spec file newer than 90 days relative to the last source code change?
+
+Based on the results, the engine chooses the best path automatically:
+
+| Situation | What happens |
+|---|---|
+| Spec passes all three gates | **Fast-path publish** — inject org metadata, validate, publish in under 10 seconds |
+| Spec passes format + freshness, but coverage is incomplete | **Hybrid merge** — AST generates the accurate structure and schemas; existing spec contributes human-written descriptions, examples, and security definitions. Better than either source alone. |
+| No spec, or spec fails format check | **Full AST pipeline** — standard generation from source code |
+
+The engine never blindly publishes an existing spec. A spec written 2 years ago
+and never updated passes format validation but fails the coverage check, because
+the current source code has diverged from what was documented. Publishing it as
+authoritative would create false confidence for API consumers.
+
+In typical enterprise inventories, 20–35% of repos already have a committed spec.
+Of those, roughly half pass the quality gates for fast-path publish.
+This makes Phase 1 batch load 10–15% faster overall, while producing richer
+catalog entries for repos where teams already invested in human-authored descriptions.
+
+---
+
+**Q: Could we just ask teams to publish their existing specs themselves instead of building this?**
+
+This is exactly the status quo — and it explains why 85%+ of the API inventory has
+no catalog entry today. Teams have specs they have not published because connecting
+a spec to the catalog is a manual, low-urgency task that never reaches a sprint.
+spec-engine solves the human coordination problem, not just the technical one.
+Even for repos with a perfect existing spec, the engine handles format upconversion
+(Swagger 2.0 → OpenAPI 3.1), injection of required org metadata (`x-owner`,
+`x-gateway`, `x-lifecycle`), validation, and publishing automatically.
 
 ---
 

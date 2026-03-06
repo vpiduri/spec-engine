@@ -1,475 +1,724 @@
-# spec-engine — Project Estimates (Build from Scratch)
+# spec-engine — Investment Proposal & Project Estimates
 
-> **Purpose:** Realistic effort estimates for planning, resourcing, and executive approval.
-> All estimates assume building spec-engine from scratch. They are based on the complexity of
-> the implemented system and known engineering effort from comparable internal tooling projects.
+> **Budget ask: $500,000 | Timeline: 6 months | Team: 6 people**
+>
+> This document provides the justification, detailed estimates, delivery timeline,
+> and return-on-investment analysis for building spec-engine from scratch and
+> deploying it across the full API inventory.
 
 ---
 
 ## Table of Contents
 
-1. [Scope & Assumptions](#1-scope--assumptions)
-2. [Team Composition](#2-team-composition)
-3. [Work Breakdown — Engine Build](#3-work-breakdown--engine-build)
-4. [Work Breakdown — Deployment Phases](#4-work-breakdown--deployment-phases)
-5. [Consolidated Timeline](#5-consolidated-timeline)
-6. [Effort Summary Table](#6-effort-summary-table)
-7. [Risk Buffers & Confidence Levels](#7-risk-buffers--confidence-levels)
-8. [What Could Accelerate or Delay](#8-what-could-accelerate-or-delay)
+1. [Executive Summary](#1-executive-summary)
+2. [Budget Breakdown](#2-budget-breakdown)
+3. [Team & Roles](#3-team--roles)
+4. [6-Month Delivery Plan](#4-6-month-delivery-plan)
+5. [Work Breakdown by Engineer](#5-work-breakdown-by-engineer)
+6. [What Is Delivered by Month 6](#6-what-is-delivered-by-month-6)
+7. [Risk Register & Contingency](#7-risk-register--contingency)
+8. [Return on Investment](#8-return-on-investment)
 9. [Milestones & Decision Gates](#9-milestones--decision-gates)
+10. [Assumptions](#10-assumptions)
+11. [Addressing Common Objections](#11-addressing-common-objections)
+    - [11.1 Could Devin or an AI agent replace the team?](#111-could-devin-or-an-ai-coding-agent-replace-the-team)
+    - [11.2 Why 4 engineers — can't 1 deliver this?](#112-why-4-engineers--cant-1-engineer-deliver-this)
 
 ---
 
-## 1. Scope & Assumptions
+## 1. Executive Summary
 
-### What is being estimated
+### The ask
 
-The full lifecycle from zero to a production-grade automated spec generation system:
+**$500,000 over 6 months** to build, test, and deploy spec-engine: an automated OpenAPI 3.1
+spec generator that covers the full API inventory across all supported programming languages
+and frameworks, with zero changes required to any application code.
 
-1. **Engine build** — the spec-engine codebase (scanners, inferrers, assembler, validator, publisher, CLI)
-2. **Batch tooling** — CSV orchestrator, CI templates, utility scripts
-3. **Documentation** — developer guide, stakeholder overview, runbooks
-4. **Deployment Phase 1** — initial CSV batch load across full API inventory
-5. **Deployment Phase 2** — platform-level CI enforcement (with Platform Engineering)
-6. **Deployment Phase 3** — steady state, monitoring, expansion
+### What is being built
 
-### What is NOT estimated
+A production-grade pipeline that automatically:
+1. Scans API source code (Java, Python, TypeScript, Go)
+2. Infers request/response schemas from annotations and type definitions
+3. Assembles a validated OpenAPI 3.1 spec per service
+4. Publishes to the API Explorer catalog on every merge to main
 
-- API Explorer catalog development (assumed to be an existing system)
-- Application team work (no app code changes required — see Assumption A1)
-- Platform Engineering internal effort (estimated separately as a dependency)
-- OpenAPI spec authoring for MANUAL-confidence cases (falls to API teams)
+### What is delivered by end of Month 6
 
-### Estimation basis
-
-These estimates are grounded in:
-- The actual spec-engine codebase that was prototyped (6 framework scanners,
-  4 schema inferrers, assembler, validator, publisher, 365 tests, 2,200+ lines of docs)
-- Typical effort ratios for AST-based static analysis tooling
-- Known complexity drivers: Go binary companion, Node.js subprocess management,
-  javalang annotation quirks, DRF nested router detection, cycle detection in inferrers
-
----
-
-## 2. Team Composition
-
-### Recommended team (minimum viable)
-
-| Role | FTE | Who | Notes |
-|---|---|---|---|
-| Senior Backend Engineer (Python) | 1.0 | SRE Frameworks | Leads scanner, inferrer, CLI, assembler |
-| Senior Backend Engineer (Polyglot) | 1.0 | SRE Frameworks | Leads Go/TypeScript tooling, batch scripts, CI integration |
-| Platform Engineer | 0.5 | Platform Engineering | Runner images, Required Workflow, Jenkins lib — **external dependency** |
-| Product/Project Manager | 0.2 | SRE Frameworks | Coordination, stakeholder comms, milestone tracking |
-
-**Core engine team: 2 FTE senior engineers**
-
-### Acceptable with reduced scope
-
-| Reduced scope | Impact |
+| Deliverable | Status |
 |---|---|
-| 1 senior engineer | Double all engine timelines; batch and deployment phases serialise |
-| Skip Go/TypeScript inferrers initially | Save 3–4 weeks; cover 70% of inventory (Java + Python dominant) |
-| Skip batch tooling initially | Run spec-engine manually per repo; add orchestrator in Phase 2 |
+| Engine supporting 7 frameworks across 4 languages | Complete |
+| Batch orchestrator — full API inventory loaded into catalog | Complete |
+| 80%+ automated test coverage | Complete |
+| Platform CI enforcement — Required Workflow / Jenkins integration | Launched (ongoing rollout) |
+| Developer Guide + Stakeholder documentation | Complete |
+| Runbooks and monitoring setup | Complete |
+
+### Why $500K is the right investment
+
+| Alternative | First-year cost | Ongoing/year | Scalable to 1,000+ APIs? |
+|---|---|---|---|
+| Manual spec writing (current state) | $560,000 | $560,000 | No |
+| Commercial tool (Swagger Hub, Stoplight) | $40,000–$100,000 | $40,000–$100,000 | Partial |
+| **spec-engine (this proposal)** | **$500,000** | **~$50,000** | **Yes** |
+
+spec-engine pays for itself before the project completes.
+Full ROI analysis is in [Section 8](#8-return-on-investment).
 
 ---
 
-## 3. Work Breakdown — Engine Build
+## 2. Budget Breakdown
 
-Estimates are **wall-clock weeks with 2 engineers working in parallel**
-unless otherwise noted. Each sub-item shows the primary owner (Eng A = Python lead,
-Eng B = polyglot lead).
+All personnel costs reflect fully-loaded 6-month allocations
+(base salary + benefits + employer taxes + overhead at market rates).
 
----
+### Personnel
 
-### 3.1 Discovery & Architecture — 3 weeks
-
-| Task | Owner | Notes |
+| Role | Specialisation | 6-Month Cost |
 |---|---|---|
-| Framework inventory: catalogue annotation patterns across target repos | Both | 20–40 sample repos; Spring, FastAPI, Django, Express, NestJS, Gin |
-| Explorer catalog API integration spec | Eng A | Auth, endpoints, payload shape, rate limits |
-| Architecture design + ADRs | Both | Tech stack, pipeline stages, confidence model, config layering |
-| Technology spikes | Eng B | Prove out Go binary approach; prove NestJS Node subprocess path |
-| Dev environment, CI for spec-engine itself | Eng B | GitHub Actions, pytest, coverage gates |
+| Senior Engineer 1 — Core Engine Lead | Config, models, base framework, assembler, CLI, publisher | $80,000 |
+| Senior Engineer 2 — Parsers: Java | Spring Boot scanner, Java AST inferrer, javalang integration | $80,000 |
+| Senior Engineer 3 — Parsers: Python | FastAPI, Django/DRF, Python AST inferrer, Pydantic | $80,000 |
+| Senior Engineer 4 — Parsers: Go/TS + CI | Express, NestJS, TypeScript inferrer, Gin/Echo, Go binary, CI templates | $80,000 |
+| Program Manager (Full-Time) | Delivery, coordination, stakeholder comms, risk tracking | $70,000 |
+| Platform Engineer | Batch tooling, runner images, Required Workflow, Jenkins Shared Library | $75,000 |
+| **Personnel subtotal** | | **$465,000** |
 
-**Risk:** Framework inventory reveals unusual patterns (annotation inheritance, custom wrappers)
-that require additional scanner complexity → +1 week buffer built into engine phases.
+### Non-Personnel
 
----
-
-### 3.2 Core Infrastructure — 3 weeks
-
-| Task | Owner | Complexity |
+| Category | Item | Cost |
 |---|---|---|
-| Data models: `RouteInfo`, `SchemaResult`, `ParamInfo`, `Confidence` | Eng A | Low |
-| `Config` system with YAML loading and CLI override layering | Eng A | Medium |
-| `BaseScanner` + `_iter_files()` with SKIP_DIRS | Eng A | Low |
-| `BaseInferrer` with cycle detection, `_rank_candidates()` | Eng A | Medium |
-| CLI skeleton (Click groups: generate, scan, schema, assemble, validate, publish) | Eng A | Low |
-| `Assembler` skeleton (operationId generation, error schemas, x- field injection) | Eng B | Medium |
-| Test infrastructure (pytest fixtures, `tmp_path`, monkeypatching patterns) | Both | Low |
+| Infrastructure | CI/CD compute (GitHub Actions), cloud storage, artifact hosting | $12,000 |
+| Tooling & Licenses | Redocly, Spectral, monitoring dashboards | $8,000 |
+| Training | Framework ramp-up, internal knowledge transfer sessions | $5,000 |
+| Contingency | 10% reserve for scope changes, delays, or unexpected complexity | $10,000 |
+| **Non-personnel subtotal** | | **$35,000** |
 
----
+### Total
 
-### 3.3 Spring Boot Scanner + Java Inferrer — 3.5 weeks
-
-**This is the most complex scanner.** Spring annotation parsing has significant edge cases.
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `SpringScanner`: `@RestController`, `@Controller` detection | Eng A | Medium | Class-level vs method-level path join |
-| `@RequestMapping`, `@GetMapping`, `@PostMapping`, etc. | Eng A | Medium | Compound annotations, `produces/consumes` |
-| Path variable extraction (`{id}`, regex path variables) | Eng A | Medium | Named groups, optional trailing slash |
-| `@RequestBody` and `@RequestParam` extraction | Eng A | High | `required`, `defaultValue`, annotation element parsing |
-| javalang annotation quirk: `element` vs `elements` lists | Eng A | High | Only discovered during real repo testing |
-| `JavaASTInferrer`: class/field traversal with javalang | Eng B | High | Java type hierarchy, generic types |
-| Jackson annotations: `@JsonProperty`, `@JsonIgnore` | Eng B | Medium | |
-| Bean Validation: `@NotNull`, `@Size`, `@Min`, `@Max` | Eng B | Medium | Maps to `required`, `minLength`, etc. |
-| Unit tests: ~50 tests, real Spring fixture files | Both | Medium | |
-
----
-
-### 3.4 Python Scanners + Inferrer — 3 weeks
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `FastAPIScanner`: decorator detection, path param extraction | Eng A | Medium | |
-| FastAPI global BaseModel pre-pass (models imported from other files) | Eng A | High | Repo-wide pre-pass before per-file scan |
-| `DjangoScanner`: two-pass URL routing + views AST | Eng A | High | `include()` chains, `router.register()` |
-| DRF mixin ViewSets: `ReadOnlyModelViewSet`, mixin combos | Eng A | High | `_MIXIN_ROUTE_MAP`, `_compute_allowed_actions()` |
-| DRF nested routers: `NestedSimpleRouter` path rewrite | Eng A | High | AST pre-pass for router var types |
-| `PythonASTInferrer`: Pydantic v1/v2 fields, dataclasses | Eng B | Medium | `Field(...)` parsing, `model_config` |
-| Unit tests: ~70 tests | Both | Medium | |
-
----
-
-### 3.5 JavaScript / TypeScript Scanners + Inferrer — 3 weeks
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `express_ast.js` Node.js companion script (route walker) | Eng B | High | AST traversal of `app.get()`, `router.use()` chains |
-| `ExpressScanner`: subprocess management, timeout, JSON parse | Eng B | Medium | Process cleanup, stderr capture |
-| `NestJSScanner`: `_node_available()` probe, delegate to Express or regex | Eng B | Medium | Framework relabelling via `dataclasses.replace` |
-| NestJS Python regex fallback: `@Controller`, `@Get`, `:param → {param}` | Eng B | Medium | |
-| TypeScript inferrer companion script (ts-morph) | Eng B | High | ts-morph setup, interface/class/type alias extraction |
-| `TypeScriptASTInferrer`: subprocess, JSON schema extraction | Eng B | Medium | |
-| `scanner/__init__.py` framework routing (split nestjs from express) | Eng B | Low | |
-| Unit tests: ~40 tests including monkeypatched subprocess | Both | Medium | |
-
----
-
-### 3.6 Go Scanner + Inferrer — 3.5 weeks
-
-**This requires a separate Go codebase compiled to a binary.**
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `go_schema_tool` companion binary (Go AST walker) | Eng B | High | Separate Go module, struct tag parsing, compilation |
-| Struct tag parsing: `json:"..."`, `validate:"required,min=1,max=100"` | Eng B | High | regex for validate tags, nullable pointer detection |
-| Gin scanner: `router.GET()`, `router.Group()`, path param normalisation | Eng B | Medium | |
-| Echo scanner: `e.GET()`, `e.Group()`, middleware chains | Eng B | Medium | |
-| `GoASTInferrer`: binary path detection, subprocess, regex fallback | Eng B | High | Fallback regex for when binary not compiled |
-| Binary caching: reuse compiled binary across runs | Eng B | Low | |
-| Unit tests: ~30 tests, `_ast_binary = None` to force regex path | Both | Medium | |
-
----
-
-### 3.7 Assembler — 2.5 weeks
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `_detect_api_metadata()`: pom.xml, package.json, CODEOWNERS | Eng A | Low | |
-| Full paths object with path deduplication | Eng A | Medium | |
-| operationId generation and deduplication | Eng A | Medium | verb + path → camelCase, collision handling |
-| Schema components section (`$ref` building) | Eng A | High | Cycle detection, circular ref prevention |
-| Standard error responses (400, 401, 403, 404, 500) | Eng A | Low | |
-| `x-confidence`, `x-owner`, `x-gateway`, `x-lifecycle` injection | Eng A | Low | |
-| ruamel.yaml serialisation preserving key order | Eng A | Low | |
-| Unit tests: ~40 tests | Both | Medium | |
-
----
-
-### 3.8 Validator + Publisher — 2 weeks
-
-| Task | Owner | Complexity | Key difficulty |
-|---|---|---|---|
-| `Validator`: shell out to `spectral lint` and/or `redocly lint` | Eng B | Low | stdout/stderr capture, exit code mapping |
-| `Publisher`: `POST /apis` + `PUT /apis/{id}` with title dedup | Eng A | Medium | httpx, token injection, error handling |
-| `publisher._check_existing()`: lookup before create vs update | Eng A | Medium | |
-| Dry-run mode throughout | Eng A | Low | |
-| Unit tests: ~25 tests with httpx mocking | Both | Medium | |
-
----
-
-### 3.9 Unit Test Suite Completion — 2 weeks
-
-By this point most tests are already written alongside features. This phase closes gaps:
-
-| Task | Notes |
+| | Amount |
 |---|---|
-| Close coverage to 80%+ target | Run `pytest --cov` and identify uncovered paths |
-| Edge case tests: empty repos, no routes found, zero-field types | |
-| CLI integration tests: full generate pipeline with `tmp_path` | |
-| Confidence model tests: MANUAL blocks publish, HIGH auto-publishes | |
+| Personnel | $465,000 |
+| Non-personnel | $35,000 |
+| **Total investment** | **$500,000** |
 
 ---
 
-### 3.10 Batch Tooling & Documentation — 2 weeks
-
-| Task | Owner |
-|---|---|
-| `batch_loader.py`: CSV loader, `clone_repo()`, `process_row()`, `ProcessPoolExecutor`, report writers | Eng B |
-| `batch_pr_creator.py` (voluntary-only tool) | Eng B |
-| `set_repo_variables.sh`, `validate_all_specs.sh` | Eng B |
-| CI templates: reusable workflow YAML, Required Workflow YAML, Jenkins groovy step | Eng B |
-| Developer Guide (~2,000 lines) | Eng A |
-| Stakeholder Overview (~1,200 lines) | Both |
-| Runbooks: publisher failure, token rotation, MANUAL triage | Eng A |
-
----
-
-### Engine Build Summary
-
-| Phase | Wall-clock weeks (2 engineers) | Parallel? |
-|---|---|---|
-| 3.1 Discovery & Architecture | 3 | Fully parallel |
-| 3.2 Core Infrastructure | 3 | Split between engineers |
-| 3.3 Spring Boot + Java | 3.5 | Eng A leads; Eng B assists on inferrer |
-| 3.4 Python Scanners + Inferrer | 3 | Eng A leads; Eng B assists on tests |
-| 3.5 JS/TS Scanners + Inferrer | 3 | Eng B leads; Eng A assists on tests |
-| 3.6 Go Scanner + Inferrer | 3.5 | Eng B leads; Eng A assists on tests |
-| 3.7 Assembler | 2.5 | Eng A leads; Eng B on tests |
-| 3.8 Validator + Publisher | 2 | Parallel (A: publisher, B: validator) |
-| 3.9 Test suite completion | 2 | Both |
-| 3.10 Batch tooling + Docs | 2 | Split |
-| **Total** | **~27–30 weeks** | |
-
-> **With 2 engineers working in parallel, the engine build takes approximately 7 months.**
-> With 1 engineer, add 60–70% to each phase → ~11–12 months for the engine alone.
-
----
-
-## 4. Work Breakdown — Deployment Phases
-
-These phases begin after the engine build is complete and unit-tested.
-They run sequentially for the batch phases; Platform Engineering engagement
-starts in parallel with Phase 1.
-
----
-
-### Phase 0 — Pilot (2–3 weeks)
-
-**Goal:** Validate the engine against real repos. Fix critical issues before scaling.
-
-| Task | Notes |
-|---|---|
-| Select 10–15 pilot repos: 2–3 per framework | Include one "messy" repo per framework |
-| Run batch loader against pilot repos | Manual review of each generated spec |
-| Spec quality review with pilot API teams | Identify confidence breakdowns, missing routes |
-| Fix critical engine bugs found in real repos | Budget: 1 week of fixes; likely 3–8 bugs |
-| Stakeholder demo: pilot results, confidence breakdown | Go/no-go gate for Phase 1 |
-
-**Expected pilot outcome:** 85–90% of pilot repos produce HIGH or MEDIUM confidence specs on first run.
-
----
-
-### Phase 1 — Full CSV Batch Load (4–5 weeks)
-
-**Goal:** Generate and publish specs for the entire API inventory.
-
-| Task | Duration | Notes |
-|---|---|---|
-| CSV validation and cleanup | 1 week | Fix stale URLs, missing framework annotations, dedup rows |
-| Credential setup: `GIT_TOKEN`, `EXPLORER_API_TOKEN` | 1–2 days | Service account, secret rotation schedule |
-| Full batch run (all repos) | 1–2 days | `batch_loader.py --workers 16 --dry-run` then `--publish` |
-| Triage `batch_report.csv`: classify failures | 1 week | git clone failures, unsupported frameworks, MANUAL confidence |
-| Re-run failed rows after fixes | 2–3 days | `--retry-failed batch_report.csv` |
-| MANUAL confidence triage with API teams | Ongoing | Cap at 10% of total; prioritise by team traffic |
-| Publish first catalog coverage metric to leadership | End of Phase 1 | Target: ≥90% of inventory published |
-
-**Expected Phase 1 outcome:** 85–95% success rate. ~5–15% of repos require manual intervention
-(wrong framework, unusual patterns, unsupported language).
-
----
-
-### Phase 2 — Platform CI Enforcement (6–10 weeks)
-
-**Goal:** Every push to main in tagged repos automatically publishes a fresh spec.
-
-**Critical dependency:** Platform Engineering team availability. This phase is
-gated on PE bandwidth and runs largely on their schedule.
-
-| Week | SRE Frameworks | Platform Engineering |
-|---|---|---|
-| W1 | Kickoff: share requirements, reusable workflow YAML, Jenkins groovy step | Confirm scope, assign PE engineer |
-| W2–3 | Answer PE questions, test runner image | Install Python + Node.js on runner images; create org secret |
-| W4–5 | Test Required Workflow on 3 pilot repos | Configure Required Workflow org policy (or Jenkins Shared Library) |
-| W6 | Run `set_repo_variables.sh` to bulk-set repo variables from CSV | Monitor rollout, fix runner issues |
-| W7–8 | Monitor success rate, fix engine issues found at CI scale | Adjust runner config if needed |
-| W9–10 | Buffer for PE delays, edge cases, and any org policy exceptions | Rollout to remaining repos |
-
-**Risk:** Platform Engineering engagement is the #1 schedule risk.
-If PE is unavailable for 4+ weeks, this phase slips. Approach 1 (batch) continues
-delivering value independently during any delay.
-
----
-
-### Phase 3 — Steady State (Month 4+, Ongoing)
-
-**Goal:** Low-maintenance operation with continuous catalog freshness.
-
-| Ongoing task | Cadence | Effort |
-|---|---|---|
-| Monitor batch run success rate (if re-run monthly) | Monthly | 2 hours |
-| Triage MANUAL-confidence cases escalated by teams | Weekly | 2–4 hours |
-| Add scanner support for new framework versions | As needed | 1–3 days per version update |
-| Add new framework scanner (e.g., Rails, Laravel) | Per roadmap | 2–4 weeks per framework |
-| CSV updates: new APIs, deprecated repos removed | Per API governance cycle | 1–2 hours |
-| Secret rotation: `GIT_TOKEN`, `EXPLORER_API_TOKEN` | Quarterly | 1 hour |
-| Engine dependency updates (Python, Node.js, javalang) | Quarterly | 1–2 days |
-| Onboard new framework: requirements → scanner → tests → release | As requested | 3–5 weeks |
-
-**Steady-state maintenance: 0.2–0.3 FTE per engineer** (shared across the SRE Frameworks team).
-
----
-
-## 5. Consolidated Timeline
+## 3. Team & Roles
 
 ```
-Month 1       Month 2       Month 3       Month 4       Month 5       Month 6       Month 7
-│─────────────┤─────────────┤─────────────┤─────────────┤─────────────┤─────────────┤────
-│ Discovery   │
-│ & Arch (3w) │
-│             │ Core Infra  │
-│             │ (3w)        │
-│             │             │ Spring+Java │
-│             │             │ (3.5w)      │
-│             │ FastAPI+DRF │             │
-│             │ (3w, A)     │             │
-│             │             │ JS/TS       │
-│             │             │ (3w, B)     │
-│             │             │             │ Go (3.5w,B) │
-│             │             │             │             │ Assembler   │
-│             │             │             │             │ (2.5w, A)   │
-│             │             │             │             │             │ Validator+  │
-│             │             │             │             │             │ Publisher   │
-│             │             │             │             │             │ Tests + Docs│
-│             │             │             │             │             │             │ ← Engine done
+┌────────────────────────────────────────────────────────────────┐
+│                    Program Manager (FT)                        │
+│  Sprint ceremonies · Stakeholder updates · Risk tracking       │
+│  Dependency management · Phase 1 CSV coordination             │
+└────────────────────────┬───────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┬───────────────┐
+         ▼               ▼               ▼               ▼
+  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+  │  Eng 1     │  │  Eng 2     │  │  Eng 3     │  │  Eng 4     │
+  │ Core Engine│  │ Java Parser│  │Python Parse│  │ Go/TS + CI │
+  │            │  │            │  │            │  │            │
+  │ Config     │  │ Spring Boot│  │ FastAPI    │  │ Express    │
+  │ Base infra │  │ Java AST   │  │ Django/DRF │  │ NestJS     │
+  │ Assembler  │  │ inferrer   │  │ Pydantic   │  │ Gin/Echo   │
+  │ CLI        │  │            │  │ inferrer   │  │ TS inferrer│
+  │ Publisher  │  │            │  │            │  │ Go binary  │
+  └────────────┘  └────────────┘  └────────────┘  └────────────┘
+                                                         │
+                                                  ┌──────▼──────┐
+                                                  │  Platform   │
+                                                  │  Engineer   │
+                                                  │             │
+                                                  │ batch_loader│
+                                                  │ CI templates│
+                                                  │ Runner imgs │
+                                                  │ Req Workflow│
+                                                  └─────────────┘
 ```
 
-```
-Month 7       Month 8       Month 9       Month 10      Month 11      Month 12+
-│─────────────┤─────────────┤─────────────┤─────────────┤─────────────┤────────────
-│ Pilot       │
-│ (2-3w)      │
-│             │ Phase 1:    │
-│             │ CSV Batch   │
-│             │ (4-5w)      │
-│             │─────────────────────────────────────────────────────────────────────
-│             │ PE Engagement starts (parallel, PE-paced)
-│             │             │             │ Phase 2:    │
-│             │             │             │ Platform CI │
-│             │             │             │ Rollout     │
-│             │             │             │ (6-10w)     │
-│             │             │             │             │             │ Phase 3:
-│             │             │             │             │             │ Steady State
-```
+### Role responsibilities
 
-**Total: approximately 12–14 months from kickoff to full production** (2 engineers).
-
----
-
-## 6. Effort Summary Table
-
-| Work item | Weeks (2 engineers, parallel) | Engineer-weeks | Confidence |
-|---|---|---|---|
-| Discovery & Architecture | 3 | 6 | High |
-| Core Infrastructure | 3 | 5 | High |
-| Spring Boot + Java Inferrer | 3.5 | 5 | High |
-| Python Scanners + Inferrer | 3 | 5 | High |
-| JS/TS Scanners + Inferrer | 3 | 5 | Medium |
-| Go Scanner + Inferrer | 3.5 | 5.5 | Medium |
-| Assembler | 2.5 | 4 | High |
-| Validator + Publisher | 2 | 3.5 | High |
-| Test suite completion | 2 | 4 | High |
-| Batch tooling + Documentation | 2 | 3.5 | High |
-| **Engine Build Total** | **~28 weeks** | **~46 engineer-weeks** | |
-| | | | |
-| Pilot (Phase 0) | 3 | 4 | High |
-| CSV Batch Load (Phase 1) | 5 | 7 | Medium |
-| Platform CI Rollout (Phase 2) | 8–10 | 6 (SRE only) | Low (PE-dependent) |
-| Ongoing maintenance (Phase 3) | Ongoing | 0.25 FTE/year | High |
-| **Total to full production** | **~52–56 weeks** | **~63–65 engineer-weeks** | |
-
----
-
-## 7. Risk Buffers & Confidence Levels
-
-### Confidence by phase
-
-| Phase | Estimate confidence | Reason |
+| Role | Month 1–3 focus | Month 4–6 focus |
 |---|---|---|
-| Engine build (core scanners, Python/Java) | **High** | Known patterns; similar work completed |
-| Engine build (Go binary, NestJS subprocess) | **Medium** | External tool dependencies; OS/PATH issues in CI common |
-| Engine build (assembler, publisher) | **High** | Well-understood HTTP + YAML work |
-| Pilot and Phase 1 batch | **Medium** | Real repo diversity always reveals unexpected patterns |
-| Phase 2 (Platform Engineering) | **Low** | Entirely dependent on PE team's roadmap and availability |
+| **Eng 1 — Core Engine** | Architecture, models, Config, base scanner/inferrer, assembler skeleton | Assembler completion, publisher, CLI, test gap-close, Developer Guide |
+| **Eng 2 — Java** | Spring Boot scanner (annotations, path vars, request body), Java AST inferrer (javalang) | Integration tests on real Spring repos, bug fixing, coverage |
+| **Eng 3 — Python** | FastAPI scanner + global Pydantic pre-pass, Django/DRF scanner + nested routers, Python inferrer | Integration tests on real Django/FastAPI repos, pilot support |
+| **Eng 4 — Go/TS/CI** | Express/NestJS scanner (Node.js subprocess + regex), TS inferrer, Gin/Echo, Go binary companion | Go inferrer regex fallback, integration tests, CI workflow templates |
+| **PM** | Kickoff, framework inventory, sprint 0, stakeholder alignment | Pilot coordination, Phase 1 CSV validation, PE engagement tracking, comms |
+| **Platform Engineer** | Dev environment, spec-engine CI, batch_loader.py | Runner images, set_repo_variables.sh, Required Workflow / Jenkins Shared Library, Phase 2 launch |
 
-### Recommended buffers
+### Why 4 engineers (not 2)
 
-| Phase | Base estimate | Buffer | Buffered estimate |
-|---|---|---|---|
-| Engine Build | 28 weeks | +15% | 32 weeks |
-| Pilot | 3 weeks | +33% | 4 weeks |
-| Phase 1 CSV Batch | 5 weeks | +40% | 7 weeks |
-| Phase 2 Platform CI | 8–10 weeks | +50% | 12–15 weeks |
+With 2 engineers, the same project takes **12–14 months** — the scanner and inferrer work
+for each language stack is largely independent and parallelises cleanly.
+Adding engineers 2 and 3 (Java + Python specialists) removes the biggest bottleneck:
+Spring Boot and FastAPI together represent ~60–70% of the typical enterprise API inventory.
+Engineer 4 covers the remaining Go and TypeScript stacks concurrently.
 
-**Total with buffers: ~55–62 weeks (~13–15 months).**
+The coordination overhead of 4 engineers is manageable because the engine is designed with
+clear interfaces: each scanner produces `List[RouteInfo]` and each inferrer consumes type
+names and produces `SchemaResult`. Engineers can develop and test their components in isolation.
 
 ---
 
-## 8. What Could Accelerate or Delay
+## 4. 6-Month Delivery Plan
 
-### Accelerators
+### Sprint cadence
 
-| Factor | Weeks saved |
+- 2-week sprints (13 sprints total)
+- Sprint ceremonies: planning (1h), daily standup (15m), retrospective (45m)
+- PM owns ceremony facilitation and stakeholder status updates
+- Every sprint ends with a working, runnable build
+
+---
+
+### Month 1 — Foundation (Weeks 1–4)
+
+**Goal:** Core infrastructure running; first two scanners functional end-to-end.
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 1 | Architecture, ADRs, framework inventory spike | Spring annotation survey, javalang spike | FastAPI/DRF annotation survey | Node.js subprocess spike, Go AST spike | Dev environment, GitHub Actions CI for spec-engine | Kickoff, stakeholder alignment, pilot repo nomination |
+| 2–3 | Models, Config (YAML + layering), BaseScanner, BaseInferrer + cycle detection | Spring Boot scanner: `@RestController`, `@GetMapping`, path vars | FastAPI scanner + global BaseModel pre-pass | Express scanner + express_ast.js companion | batch_loader.py skeleton, CSV format spec | Sprint ceremonies, ADR sign-off, framework inventory report |
+| 4 | Assembler skeleton (operationId, x- fields, $ref structure) | Java AST inferrer start (javalang field traversal) | Django scanner: URL routing two-pass AST | NestJS scanner: Python regex + Node.js delegation | CI workflow template skeleton | Risk register update, Month 1 progress report to leadership |
+
+**Month 1 exit criteria:** `spec-engine generate` works end-to-end for at least one Spring Boot repo and one FastAPI repo. Unit tests running in CI with >50% coverage on completed modules.
+
+---
+
+### Month 2 — Full Scanner Coverage (Weeks 5–8)
+
+**Goal:** All 7 framework scanners complete and unit-tested.
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 5 | Assembler: paths object, error responses, deduplication | Java inferrer: Jackson annotations, Bean Validation | Django: mixin ViewSets, nested routers | Go binary companion (`go_schema_tool`) build | batch_loader.py: clone, process_row, report writers | Sprint planning, dependency tracking |
+| 6 | Assembler: schema components, ruamel.yaml serialisation | Java inferrer: generic types, `@Valid` recursion | DRF nested routers (NestedSimpleRouter pre-pass) | Gin/Echo scanner: route groups, path normalisation | set_repo_variables.sh, validate_all_specs.sh | Mid-month stakeholder update |
+| 7 | Assembler: confidence rollup, MANUAL block logic | Java inferrer complete; Spring unit tests (~50 tests) | Python inferrer: Pydantic v1/v2, dataclasses, TypedDict | TypeScript inferrer: ts-morph subprocess | CI workflow templates (GitHub + Jenkins) | Phase 1 CSV template shared with API Governance |
+| 8 | Validator: Spectral + Redocly integration, exit codes | Java unit tests complete | Python unit tests complete (~70 tests) | Go inferrer: struct tags, nullable pointers, regex fallback; TS unit tests | PE engages Platform Engineering team (Approach 2 kickoff) | Sprint retro, risk review, Phase 2 engagement letter |
+
+**Month 2 exit criteria:** All scanners and inferrers unit-tested. Full pipeline runnable on synthetic repos. 70%+ coverage on scanner modules.
+
+---
+
+### Month 3 — Integration Testing & Hardening (Weeks 9–12)
+
+**Goal:** Engine validated on real (internal) repos. 80%+ test coverage achieved.
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 9 | Publisher: POST/PUT to Explorer catalog, dry-run | Integration test: 3 real Spring Boot repos | Integration test: 3 real FastAPI repos | Integration test: 2 real NestJS/Express repos | Runner image setup with Python + Node.js (PE-facing) | Pilot repo selection (10–15 repos, 2–3 per framework) |
+| 10 | CLI: all subcommands polished, `--framework` flag, `--prefer-file` | Bug fixes from Spring repo testing | Bug fixes from Python repo testing | Integration test: 2 real Gin/Go repos + bug fixes | Required Workflow design review with PE team | Phase 1 CSV collection from API Governance |
+| 11 | `_rank_candidates()`, conflict resolution, test gap-close | Spring test suite complete; ~80% coverage on Java path | Python test suite complete; ~80% coverage on Python path | Go + TS test suite complete; ~80% coverage | PE: org secret creation, pilot Required Workflow configuration | CSV validation run — identify stale URLs, missing framework |
+| 12 | End-to-end integration test: `generate` pipeline on 5 diverse repos | Code review pass, PR reviews | Code review pass, PR reviews | Code review pass, PR reviews | PE: test Required Workflow on 2 internal pilot repos | Month 3 progress report; demo prep for leadership |
+
+**Month 3 exit criteria:** 80%+ overall test coverage (365+ tests). End-to-end pipeline green on 5 real repos across different frameworks. Publisher talking to Explorer catalog (staging).
+
+---
+
+### Month 4 — Pilot & Documentation (Weeks 13–16)
+
+**Goal:** 10–15 pilot repos generating specs. First stakeholder demo. Docs complete.
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 13 | Developer Guide (architecture, extending, testing, batch) | Pilot: Spring Boot repos — review generated specs manually | Pilot: FastAPI + Django repos — review generated specs | Pilot: Go + NestJS repos — review generated specs | PE: Required Workflow on 5 pilot repos; monitor success rate | Pilot coordination, issue triage log |
+| 14 | Bug fixes from pilot — assembler, confidence levels | Fix critical Spring scanner issues from pilot | Fix critical Python scanner issues from pilot | Fix critical Go/TS issues from pilot; CI template refinements | Batch run on pilot repos: `batch_loader.py --dry-run` | Leadership demo #1: pilot results, confidence breakdown |
+| 15 | Stakeholder Overview document | Cross-framework issue review + regression tests | Regression tests after fixes | Regression tests after fixes | PE: `set_repo_variables.sh` on pilot repos | Phase 1 CSV finalized (all inventory rows validated) |
+| 16 | Runbooks: publisher failure, token rotation, MANUAL triage | Documentation review pass | Documentation review pass | Documentation review pass | PE: Jenkins Shared Library `specEngine()` step | Month 4 progress report; go/no-go for Phase 1 |
+
+**Month 4 exit criteria:** 10–15 pilot repos producing specs in Explorer catalog (staging). 90%+ pilot success rate. All documentation complete. Leadership demo delivered.
+
+---
+
+### Month 5 — Phase 1: Full CSV Batch Load (Weeks 17–20)
+
+**Goal:** Full API inventory published to Explorer catalog (production).
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 17 | Final credential setup: GIT_TOKEN, EXPLORER_API_TOKEN production | Batch run support: Java-framework failures | Batch run support: Python-framework failures | Batch run support: Go/TS failures | Full batch run: `batch_loader.py --workers 16 --dry-run` | Stakeholder notification: batch starting |
+| 18 | `batch_report.csv` triage: classify failure types | Fix engine bugs from batch failures (Java) | Fix engine bugs from batch failures (Python) | Fix engine bugs from batch failures (Go/TS) | Full batch run (production): `--publish` | Triage report to leadership: how many published, how many failed, why |
+| 19 | `--retry-failed` re-run on fixed repos | MANUAL confidence triage: Java services | MANUAL confidence triage: Python services | MANUAL confidence triage: TS/Go services | PE: Required Workflow rollout to `api-service` tagged repos | Phase 2 status update: PE rollout plan |
+| 20 | Catalog coverage dashboard | Final regression pass | Final regression pass | Final regression pass | PE: Monitor Required Workflow success rate | Phase 1 complete report: % published, confidence breakdown, MANUAL backlog |
+
+**Month 5 exit criteria:** ≥90% of API inventory published to Explorer catalog. `batch_report.csv` shows <5% hard failures. Required Workflow running on 20+ repos.
+
+---
+
+### Month 6 — Phase 2 Launch & Handover (Weeks 21–26)
+
+**Goal:** Platform CI enforcement live. Project handed to run-and-maintain mode.
+
+| Week | Eng 1 | Eng 2 | Eng 3 | Eng 4 | PE | PM |
+|---|---|---|---|---|---|---|
+| 21–22 | Monitoring setup: dashboard, alert rules for publish failures | Handover: Java scanner extension guide | Handover: Python scanner extension guide | Handover: Go/TS scanner extension guide | PE: Complete org-wide Required Workflow rollout; monitor | Leadership demo #2: full catalog coverage, CI live |
+| 23–24 | Address MANUAL-confidence backlog cases (top 10) | Bug fixing: production issues week 1 | Bug fixing: production issues week 1 | Bug fixing: production issues week 1 | PE: Jenkins Shared Library in production | CSV ownership handover to API Governance team |
+| 25 | Final documentation updates based on production learnings | Knowledge transfer sessions with future maintainers | Knowledge transfer sessions | Knowledge transfer sessions | PE: runbook for Required Workflow issues | Project closure report, lessons learned |
+| 26 | Final code review + release tag `v1.0.0` | — | — | — | PE: steady state handover | Executive presentation: delivered scope, ROI realised, Phase 3 roadmap |
+
+**Month 6 exit criteria:** Required Workflow running on all `api-service`-tagged repos. Project formally closed. Maintenance responsibility transferred. `v1.0.0` release tagged.
+
+---
+
+## 5. Work Breakdown by Engineer
+
+### Eng 1 — Core Engine Lead
+
+The backbone of the system — every other component depends on these.
+
+| Component | Weeks | Complexity |
+|---|---|---|
+| Data models: `RouteInfo`, `SchemaResult`, `ParamInfo`, `Confidence` | 1 | Low |
+| `Config` system: YAML loading, CLI override layering, `framework`/`prefer_file` fields | 1 | Medium |
+| `BaseScanner` + `_iter_files()` with SKIP_DIRS | 0.5 | Low |
+| `BaseInferrer` with cycle detection, `_rank_candidates()` | 1 | Medium |
+| CLI (Click): generate, scan, schema, assemble, validate, publish subcommands | 1 | Low |
+| `Assembler`: operationId generation, schema $ref building, error responses, x- fields, ruamel.yaml | 3 | High |
+| `Validator`: Spectral + Redocly subprocess integration | 1 | Low |
+| `Publisher`: POST/PUT to Explorer catalog, title dedup, dry-run | 1.5 | Medium |
+| Unit tests: models, config, assembler, publisher (~90 tests) | 2 | Medium |
+| Developer Guide | 1.5 | Low |
+| Stakeholder Overview + runbooks | 1 | Low |
+
+**Total: ~15 weeks of work delivered in 6 months (includes reviews and integration support)**
+
+---
+
+### Eng 2 — Java/Spring Boot
+
+Spring Boot is the highest-complexity scanner due to annotation semantics.
+
+| Component | Weeks | Key difficulty |
+|---|---|---|
+| `SpringScanner`: `@RestController`, `@Controller`, `@RequestMapping`, `@GetMapping` etc. | 2 | Class-level vs method-level path join |
+| Path variable extraction, `produces/consumes`, compound annotations | 1 | Nested annotation arrays |
+| `@RequestBody`, `@RequestParam`, `@PathVariable` extraction | 1.5 | `required`, `defaultValue`, annotation element parsing; javalang `element` vs `elements` list bug |
+| `JavaASTInferrer`: field traversal, generic type resolution | 2 | Type hierarchy, `List<T>`, `Optional<T>` |
+| Jackson: `@JsonProperty`, `@JsonIgnore`, `@JsonAlias` | 1 | |
+| Bean Validation: `@NotNull`, `@Size`, `@Min`, `@Max` → JSON Schema constraints | 1 | |
+| Unit tests: ~50 tests; integration tests: 5 real Spring repos | 2 | |
+
+**Total: ~10.5 weeks**
+
+---
+
+### Eng 3 — Python Frameworks
+
+Python stack covers two major frameworks with distinct URL routing models.
+
+| Component | Weeks | Key difficulty |
+|---|---|---|
+| `FastAPIScanner`: decorator detection, path params, `Depends()` filtering | 1 | |
+| FastAPI global BaseModel pre-pass (models imported from other files) | 1 | Repo-wide scan before per-file analysis |
+| `DjangoScanner`: two-pass URL routing AST + views resolution | 1.5 | `include()` chains, namespace handling |
+| DRF: `router.register()`, `ModelViewSet`, `ReadOnlyModelViewSet`, mixin combos | 1.5 | `_MIXIN_ROUTE_MAP`, `_compute_allowed_actions()` |
+| DRF nested routers: `NestedSimpleRouter` pre-pass, compound path rewrite | 1 | AST pre-pass for router var classification |
+| `PythonASTInferrer`: Pydantic v1/v2 fields, dataclasses, TypedDict | 2 | `Field(...)` parsing, `model_config` in v2 |
+| Unit tests: ~70 tests; integration tests: 5 real Python repos | 2 | |
+
+**Total: ~10 weeks**
+
+---
+
+### Eng 4 — Go/TypeScript/CI
+
+Most technologically diverse role — requires Go, Node.js, and Python expertise.
+
+| Component | Weeks | Key difficulty |
+|---|---|---|
+| `express_ast.js` Node.js companion (AST walker for Express routes) | 1.5 | `app.get()`, `router.use()` chain traversal |
+| `ExpressScanner`: subprocess management, JSON output, timeout handling | 1 | |
+| `NestJSScanner`: `_node_available()` probe, delegate to Express, Python regex fallback | 1 | `dataclasses.replace()` for framework relabelling |
+| `go_schema_tool` Go binary companion: Go AST struct walker | 2 | Separate Go module, struct tag parsing, binary caching |
+| `GinScanner` + `EchoScanner`: route groups, path normalisation | 1.5 | `engine.Group()` nesting |
+| `GoASTInferrer`: binary subprocess, regex fallback, struct tags, nullable pointer, slice types | 1.5 | `validate:"required,min=1,max=100"` parsing |
+| `TypeScriptASTInferrer`: ts-morph subprocess, interface/class/type alias extraction | 1 | |
+| CI workflow templates: GitHub Actions reusable workflow, Required Workflow YAML, Jenkins groovy step | 1 | |
+| Unit tests: ~80 tests; integration tests: 4 real Go/TS repos | 2 | |
+
+**Total: ~12.5 weeks**
+
+---
+
+### Platform Engineer
+
+Focused on operationalisation: batch tooling, CI infrastructure, Platform Engineering liaison.
+
+| Component | Weeks |
 |---|---|
-| Reuse an existing Go AST library instead of custom binary | 2–3 weeks |
-| Target only 3 frameworks initially (Spring, FastAPI, Django), add others later | 5–7 weeks |
-| Platform Engineering has runner images and org secrets already set up | 3–4 weeks (Phase 2) |
-| Teams use standard annotations consistently (no custom wrappers) | 1–2 weeks (fewer scanner edge cases) |
-| Pre-validated, clean API inventory CSV from CMDB | 1–2 weeks (Phase 1) |
-| 3rd engineer added to engine build team | 4–6 weeks (engine phase) |
+| Dev environment setup, spec-engine CI (GitHub Actions, pytest, coverage) | 1 |
+| `batch_loader.py`: CSV loader, clone, process, parallel executor, report writers | 2.5 |
+| `set_repo_variables.sh`, `validate_all_specs.sh` | 0.5 |
+| GitHub Actions workflow templates (reusable + Required Workflow + per-repo) | 1 |
+| Jenkins Shared Library `specEngine()` groovy step | 1 |
+| Platform Engineering engagement: runner image update, org secret, Required Workflow policy | 3 |
+| Phase 1 batch execution and monitoring | 2 |
+| Phase 2 rollout monitoring and incident response | 2 |
+| Runbooks: token rotation, Required Workflow failures, batch re-run SOP | 1 |
 
-### Delayers
+**Total: ~14 weeks**
 
-| Factor | Weeks added |
+---
+
+## 6. What Is Delivered by Month 6
+
+| # | Deliverable | Owner | Done by |
+|---|---|---|---|
+| 1 | Engine: all 6 framework scanners (Spring, FastAPI, Django, Express, NestJS, Gin/Echo) | Eng 1–4 | Month 3 |
+| 2 | Engine: all 4 schema inferrers (Java, Python, TypeScript, Go) | Eng 1–4 | Month 3 |
+| 3 | Assembler: full OpenAPI 3.1 spec generation with x- extensions | Eng 1 | Month 2 |
+| 4 | Validator: Spectral + Redocly integration | Eng 1 | Month 3 |
+| 5 | Publisher: Explorer catalog POST/PUT with confidence gating | Eng 1 | Month 3 |
+| 6 | CLI: all subcommands + `--framework` override + `--prefer-file` | Eng 1 | Month 3 |
+| 7 | 80%+ automated test coverage (365+ tests) | All engineers | Month 3 |
+| 8 | batch_loader.py: parallel CSV-driven batch orchestrator | PE | Month 2 |
+| 9 | CI templates: GitHub Actions reusable workflow, Jenkins Shared Library | Eng 4 + PE | Month 3 |
+| 10 | Platform Engineering engagement complete (runner images, secrets, Required Workflow) | PE | Month 5–6 |
+| 11 | Pilot: 10–15 repos generating live specs in Explorer catalog | All | Month 4 |
+| 12 | Phase 1: full API inventory published to Explorer catalog (≥90%) | PM + PE | Month 5 |
+| 13 | Phase 2: Required Workflow / Jenkins step live on all `api-service` repos | PE | Month 6 |
+| 14 | Developer Guide + Stakeholder Overview + runbooks | Eng 1 + PM | Month 4–5 |
+
+---
+
+## 7. Risk Register & Contingency
+
+### Top 5 risks to the 6-month timeline
+
+| Risk | Likelihood | Schedule impact | Mitigation |
+|---|---|---|---|
+| **Platform Engineering unavailable** — PE engagement is the #1 external dependency; if PE team is backlogged, Required Workflow rollout slips | High | +4–8 weeks (Phase 2 only; Phase 1 unaffected) | Start PE engagement in Month 2; Phase 1 CSV batch delivers value independently. Phase 2 slippage does not block the $500K deliverables. |
+| **Framework version diversity** — Spring Boot 3.x annotation changes, FastAPI 0.110+ `model_config` syntax, DRF 3.15 differences | Medium | +2–3 weeks (absorbed in Month 3 hardening) | Month 3 integration tests on real repos surface these early; 1-week hardening buffer built in. |
+| **Cross-repo type dependencies** — shared DTO libraries not in scanned repo; inferrer returns MANUAL confidence | Medium | None to schedule; increases MANUAL backlog | Confidence model handles this gracefully; MANUAL cases flagged, not blocked. |
+| **Explorer catalog API instability** — undocumented endpoint changes break publisher | Low | +1–2 weeks | Publisher logs all HTTP errors; catalog team contacted in Month 1 to agree on API stability SLA. |
+| **Team ramp-up slower than expected** — engineers unfamiliar with javalang quirks, ts-morph, or Go AST | Low–Medium | +1–2 weeks | Technology spikes in Week 1 surface unknowns early; pairing between engineers during Month 2. |
+
+### Contingency budget
+
+The $10,000 contingency reserve (2% of $500K) covers:
+- Additional compute costs if batch runs require more GitHub Actions minutes
+- Emergency contractor help if one engineer is unavailable for >2 weeks
+- Any tooling or licensing costs not anticipated at proposal time
+
+> **Note:** The 10% contingency on non-personnel costs ($35K total non-personnel) provides
+> meaningful buffer; personnel costs are fixed at salary allocation rates.
+
+---
+
+## 8. Return on Investment
+
+### Cost of the status quo
+
+Based on an inventory of 200 API services (typical enterprise scale):
+
+| Activity | Calculation | Annual cost |
+|---|---|---|
+| **Initial spec authoring** — senior dev writes each spec manually | 200 APIs × 4 days × $700/day | $560,000 (one-time) |
+| **Ongoing spec maintenance** — update spec when API changes | 200 APIs × 1 day/quarter × 4 quarters × $700/day | $560,000/year |
+| **Consumer onboarding friction** — teams spend extra time finding/requesting docs | 200 APIs × avg 2 days/year × $700/day | $280,000/year |
+| **Integration incidents from stale docs** — debugging time from outdated specs | Conservative: 20 incidents/year × 2 days each × $700/day | $28,000/year |
+| **Total first-year cost (manual approach)** | | **$1,428,000** |
+
+### Cost with spec-engine
+
+| Activity | Cost |
 |---|---|
-| Framework version diversity requiring per-version scanner branches | 3–5 weeks |
-| Widespread monorepos in the inventory | 2–3 weeks (scanner rework) |
-| Platform Engineering unavailable for 6+ weeks | 6–12 weeks (Phase 2) |
-| Explorer catalog API is undocumented or unstable | 2–4 weeks (publisher rework) |
-| Security review requires changes to token handling or data residency | 2–4 weeks |
-| Unexpected prevalence of dynamic route registration | 3–5 weeks (requires confidence model rework) |
-| Java type system edge cases: generics, inner classes, sealed classes | 2–3 weeks |
+| Build spec-engine (this proposal) | $500,000 (one-time) |
+| Ongoing maintenance — 0.25 FTE + infrastructure | ~$50,000/year |
+| **Total first-year cost (spec-engine)** | **$550,000** |
+
+### ROI summary
+
+| Metric | Value |
+|---|---|
+| First-year savings vs. manual | $1,428,000 − $550,000 = **$878,000** |
+| Payback period | **< 5 months** (before project completes) |
+| 3-year net savings | $878,000 + 2 × ($1,378,000 − $50,000) = **~$3.5M** |
+| Break-even point | Mid-project (Month 4–5, once batch load runs) |
+
+> These numbers are conservative. They do not count: governance/audit risk reduction,
+> faster consumer team onboarding, or the compounding value of a live,
+> accurate catalog for API discoverability.
+
+### Scaling argument
+
+The cost of manual spec authoring scales linearly with inventory size.
+spec-engine's cost does **not**:
+
+| Inventory size | Manual first-year cost | spec-engine year 1 | spec-engine year 2+ |
+|---|---|---|---|
+| 100 APIs | $700,000 | $500,000 | $50,000 |
+| 200 APIs | $1,400,000 | $500,000 | $50,000 |
+| 500 APIs | $3,500,000 | $500,000 | $70,000 |
+| 1,000 APIs | $7,000,000 | $500,000 | $90,000 |
 
 ---
 
 ## 9. Milestones & Decision Gates
 
-| # | Milestone | When | Decision / action |
-|---|---|---|---|
-| M1 | Architecture approved | Week 3 | Proceed to engine build |
-| M2 | Spring Boot + FastAPI end-to-end working | Week 10 | Demo to API Governance team; confirm priority framework list |
-| M3 | All 6 scanners complete, 80% test coverage | Week 22 | Go/no-go for batch tooling; request pilot repo nominations |
-| M4 | Engine complete + documented | Week 28 | Go/no-go for pilot |
-| M5 | Pilot complete (10–15 repos) | Week 31 | Leadership demo; approve Phase 1 CSV batch |
-| M6 | Phase 1 complete (≥90% inventory published) | Week 38 | Celebrate; initiate PE engagement for Phase 2 |
-| M7 | Phase 2 Required Workflow live on pilot repos | Week 46 | PE go/no-go for org-wide rollout |
-| M8 | Phase 2 fully rolled out | Week 52–56 | Steady state; hand off to run-and-maintain mode |
+| # | Milestone | Target date | Go/no-go criteria | Decision owner |
+|---|---|---|---|---|
+| **M1** | Architecture approved | End of Week 1 | ADRs reviewed; framework inventory complete; team aligned | SRE Frameworks Lead |
+| **M2** | First end-to-end pipeline | End of Month 1 | `spec-engine generate` works for Spring Boot + FastAPI; CI passing | Engineering Lead |
+| **M3** | All scanners complete | End of Month 2 | All 7 framework scanners unit-tested; 70%+ coverage | Engineering Lead |
+| **M4** | Engine hardened on real repos | End of Month 3 | 80%+ test coverage; 5 real repos produce valid specs; Publisher talking to catalog (staging) | Engineering Lead |
+| **M5** | Pilot complete | End of Month 4 | 10–15 repos live in Explorer catalog; ≥90% pilot success rate | **Leadership go/no-go for Phase 1** |
+| **M6** | Phase 1 complete | End of Month 5 | ≥90% of inventory published; `batch_report.csv` < 5% hard failures | **Leadership + API Governance sign-off** |
+| **M7** | Phase 2 launched | End of Month 6 | Required Workflow running on all `api-service`-tagged repos; project closed | **Platform Engineering + SRE Frameworks** |
+| **M8** | Steady state | Month 9 (post-project) | Zero open P1 issues; maintenance SOP in place; 0.25 FTE ongoing | SRE Frameworks Team |
+
+### What happens if a milestone slips
+
+| Milestone at risk | Impact | Response |
+|---|---|---|
+| M3 (all scanners) slips 2 weeks | Phase 1 batch delayed by 2 weeks | PM activates contingency; Eng 1 assists slowest scanner |
+| M5 (pilot) slips 2 weeks | Phase 1 delayed by 2 weeks; Phase 2 start shifts | Acceptable; leadership informed; budget unaffected |
+| M7 (Phase 2) slips 4–8 weeks | Required Workflow rollout extends into Month 7–8 | Phase 1 value already delivered; PE dependency managed separately |
+
+---
+
+## 10. Assumptions
+
+| # | Assumption | If false → impact |
+|---|---|---|
+| A1 | 4 senior engineers are fully dedicated (no split responsibilities) | Each 20% allocation drag adds ~1 month to timeline |
+| A2 | Platform Engineering engages in Month 2 | Phase 2 slips proportionally; Phase 1 unaffected |
+| A3 | Explorer catalog API is documented and stable | Publisher rework adds 2–3 weeks |
+| A4 | API inventory CSV exists and is reasonably accurate (>80% valid rows) | Additional 2–3 weeks for CSV remediation |
+| A5 | Target repos use standard framework annotations (no custom forks or unusual patterns in >30% of repos) | Additional hardening cycle in Month 4; pilot may need extending |
+| A6 | Python 3.11+ and Node.js 20 can be installed on CI runners | PE scope increases by 1–2 weeks for custom runner image build |
+| A7 | No major framework version changes released during the 6-month build period that invalidate scanner patterns | Unlikely; if it occurs, 1-week hotfix |
+
+---
+
+## 11. Addressing Common Objections
+
+This section directly responds to two objections that typically arise during
+budget review for projects of this type:
+
+1. *"Could we use Devin or an AI coding agent instead of a full team?"*
+2. *"This seems straightforward — why can't 1 engineer deliver it?"*
+
+Both are reasonable questions that deserve honest, data-driven answers.
+
+---
+
+### 11.1 Could Devin or an AI coding agent replace the team?
+
+**No. The bottleneck of this project is not writing code.**
+
+Devin and similar autonomous AI agents are valuable for isolated, well-specified
+software tasks. This project does not fit that profile. Here is a breakdown of
+where time is actually spent — and whether AI can substitute for it.
+
+#### Where the 46 engineer-weeks actually go
+
+```
+Activity category                  Weeks    AI-substitutable?
+────────────────────────────────── ─────    ─────────────────
+Writing initial scanner/inferrer     12     Partially — AI accelerates first-pass code
+  code for 4 language ecosystems           but can't test against real internal repos
+
+Integration testing on real repos     8     No — requires access to internal GitHub org
+  (30+ real repos, 6 frameworks)           and knowledge of internal annotation patterns
+
+Debugging real-repo edge cases        7     No — requires language-ecosystem expertise
+  discovered during testing                and access to the failing repos
+
+Platform Engineering engagement       4     No — requires human coordination, meetings,
+  (runner images, Required Workflow)       architecture review, org policy setup
+
+Assembler, validator, publisher       4     Partially — standard HTTP/YAML work;
+  integration with Explorer catalog        but requires access to internal catalog API
+
+Batch tooling, CSV validation,        3     Partially — scripting work; AI useful
+  production batch run coordination
+
+Documentation, runbooks               4     Partially — AI can draft; humans must
+                                           validate accuracy against real behaviour
+
+Code review, cross-team QA,           4     No — requires human judgment and context
+  knowledge transfer
+                                    ───
+Total                                46
+```
+
+**Conclusion:** roughly 30–35% of the work is code generation where AI assistance
+meaningfully accelerates delivery. The remaining 65–70% is integration, judgment,
+and coordination work that requires humans with enterprise access.
+
+#### The security argument
+
+The entire justification for building spec-engine in-house — rather than
+using a SaaS documentation tool — is that **source code never leaves the
+enterprise environment.** Using an autonomous AI agent to build this tool
+requires granting that agent read access to internal source repositories
+for testing. This is a larger and more sensitive access grant than any
+commercial documentation tool requires. It directly contradicts the
+privacy rationale that makes spec-engine preferable to commercial
+alternatives in the first place.
+
+#### The cost argument
+
+Devin and comparable agents charge per task-hour. This project involves
+dozens of iterative integration test cycles, each revealing new edge
+cases requiring research and design decisions. The $500K proposal has
+a fixed budget and a defined scope. AI agent costs for equivalent
+iterative, exploratory work are unpredictable and in comparable
+industry projects have typically **exceeded** the cost of an equivalent
+human team for the same timeline.
+
+#### The right role for AI tools
+
+AI coding assistants (Copilot, Claude Code) ARE used by the engineers
+on this team, running locally, against internal repos they already have
+access to. This is not an either-or question. The proposal assumes AI
+assistance throughout — it is part of why 4 engineers can deliver
+in 6 months what historically took 12+. AI accelerates individual
+engineers; it does not replace the team for a project of this
+integration and coordination complexity.
+
+---
+
+### 11.2 Why 4 engineers — can't 1 engineer deliver this?
+
+**Not in 6 months. The math doesn't work, and the skill set doesn't consolidate.**
+
+This is the most important objection to address directly, so the
+analysis below is thorough.
+
+#### The sequential timeline for 1 engineer
+
+Every component in the engine has a dependency structure.
+Core infrastructure must exist before scanners can be built.
+The assembler cannot be fully tested until at least one scanner works.
+Integration testing cannot start until scanners produce output.
+
+Given those constraints, here is the realistic sequential timeline
+for a single senior engineer — one who is strong in Python but also
+capable in Java, Go, and TypeScript:
+
+```
+Phase                                    Weeks   Notes
+──────────────────────────────────────── ─────   ──────────────────────────────────────
+Architecture, discovery, tech spikes       3     Same as 4-engineer plan
+Core infrastructure                        3     Same; not parallelizable
+Spring Boot scanner                        3     Eng 2's 3-week workstream
+Java AST inferrer                          2.5   Eng 2's remaining work
+FastAPI scanner + Pydantic inferrer        3     Eng 3's workstream
+Django/DRF scanner + nested routers        3     Eng 3's remaining work
+Express + NestJS scanners                  2.5   Half of Eng 4's workstream
+TypeScript inferrer                        1.5   Eng 4
+Go binary companion + Gin/Echo scanner     3.5   Eng 4 — Go requires separate module
+Go AST inferrer + regex fallback           2     Eng 4
+Assembler (full)                           2.5   Eng 1's later workstream
+Validator + Publisher                      2     Eng 1
+Test suite completion                      2     Was split across all 4; now serial
+Batch tooling                              2     PE's workstream
+Documentation                             2     Eng 1
+──────────────────────────────────────── ─────
+Engine total                              37.5 weeks  ≈ 9.4 months
+
+Pilot (cannot start until engine done)    3
+Phase 1 CSV batch                         5
+Phase 2 PE engagement (still external)    8+
+──────────────────────────────────────── ─────
+Total to full production                  53+ weeks   ≈ 13 months
+```
+
+**With 1 engineer, the project delivers in 13 months, not 6.**
+The 6-month target requires parallel execution of independent
+workstreams. There is no other way to achieve it.
+
+#### The skill set does not consolidate in one person
+
+The four language ecosystems in this project each require deep,
+current expertise:
+
+| Ecosystem | Required knowledge | Ramp time for non-specialist |
+|---|---|---|
+| Java / Spring Boot | `javalang` internals, annotation element parsing, Java type system, generic resolution | 3–5 weeks to reach production-quality output |
+| Python / FastAPI / DRF | `ast` module, Pydantic v1 vs v2 differences, DRF router internals, nested router AST pre-pass | 1–2 weeks (if Python-native) |
+| Go | `go/ast` package, struct tag parsing, Go module system, cross-compiling a companion binary | 4–6 weeks for a Python engineer |
+| TypeScript / Node.js | `ts-morph` API, TypeScript compiler types, Node.js subprocess management | 3–4 weeks |
+
+A single engineer who is strong in one ecosystem will spend 10–18 weeks
+ramping up on the other three — time that appears nowhere in an optimistic
+estimate but is always paid in the schedule.
+
+#### What gets cut when the team shrinks
+
+If the project is forced to 1 engineer + 1 PM, something must give.
+The realistic trade-offs are:
+
+| Option | What you give up | Consequence |
+|---|---|---|
+| **Drop 2 language stacks** (e.g., Go + TypeScript) | Gin, Echo, NestJS, Express not covered | ~30–40% of API inventory not covered in Phase 1 |
+| **Keep all stacks, extend timeline to 12+ months** | 6-month target missed | Platform Engineering engagement delayed; business value delayed by 6 months |
+| **Use low-quality regex instead of AST** for some stacks | Confidence falls to MEDIUM/MANUAL for Go and TS services | Catalog is incomplete; trust deficit with API teams |
+| **Skip integration testing** | Edge cases hit production | First batch run has 40–60% failure rate; MANUAL backlog overwhelms teams |
+
+None of these trade-offs are acceptable for a project meant to establish
+the API catalog as the authoritative source of truth for the organization.
+
+#### The staffing risk argument
+
+With 1 engineer on a 13-month project:
+- If the engineer is unavailable for 4 weeks (illness, leave, departure),
+  the project slips by 4 weeks with no recovery path
+- No peer review means bugs in the scanner reach production and undermine
+  trust in the catalog
+- All institutional knowledge about annotation edge cases lives in one person
+- The Platform Engineering engagement has no technical partner when the
+  engineer is debugging scanner issues
+
+With 4 engineers:
+- Any one engineer's 4-week absence is absorbed by the team; schedule
+  impact is 0–1 weeks
+- Every scanner and inferrer is reviewed by at least one other engineer
+- Knowledge is distributed; the project survives personnel changes
+
+#### The "simple" framing
+
+The pipeline does look simple at the conceptual level:
+*read code → extract routes → write YAML.* This is accurate.
+
+What is not visible from that summary:
+- 365 tests covering edge cases across 4 languages and 7 frameworks
+- A separate Go binary codebase required for Go AST traversal
+- A Node.js companion script for TypeScript inference
+- Annotation-parsing bugs that only appear against real internal repos
+- DRF mixin ViewSet filtering logic requiring 3 passes over the class hierarchy
+- Cycle detection in the inferrer to handle recursive type definitions
+
+These are not surprises or scope creep. They are the expected complexity of
+building a multi-language static analysis tool. They were discovered and
+resolved because the team has the time and expertise to handle them properly.
+A single engineer on a compressed timeline would either skip them (producing
+a low-quality tool) or spend 13 months solving them (missing the target).
+
+#### Summary: 1 engineer vs 4 engineers
+
+| Dimension | 1 Engineer + 1 PM | 4 Engineers + 1 PM + 1 PE |
+|---|---|---|
+| Timeline to full production | 13+ months | 6 months |
+| Language stack coverage | Risk of dropping 1–2 stacks | All 4 stacks covered in parallel |
+| Integration test quality | Limited (single perspective) | Peer-reviewed; real repo validated |
+| Staffing risk | Single point of failure | Distributed; resilient |
+| Knowledge retention | All in one person | Distributed across team |
+| Platform Engineering capacity | Engineer splits time | Dedicated PE handles operationalisation |
+| Budget | ~$155K (1 SE + 1 PM × 13mo) | $500K × 6mo |
+| Value delivered at Month 6 | ~50% of engine, no deployment | Full engine, pilot, Phase 1 complete |
+| Cost per month of delay | $840K/year opportunity cost forgone | Fully delivered on schedule |
+
+The 1-engineer option costs less per month but delivers the same
+final output 7 months later, foregoing **$490,000 in annual savings**
+from the delayed catalog coverage (based on the ROI model in Section 8).
+It is the more expensive option over any 18-month horizon.
 
 ---
 
 *Document version: March 2026*
-*Status: Draft for planning and executive review*
+*Status: Investment proposal — ready for executive review and budget approval*
 *Authors: SRE Frameworks Team*
